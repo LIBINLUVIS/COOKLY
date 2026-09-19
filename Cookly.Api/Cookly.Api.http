@@ -1,0 +1,6 @@
+@Cookly_HostAddress = http://localhost:5087
+
+GET {{Cookly_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
