@@ -1,6 +1,6 @@
 namespace Cookly.Api.Endpoints;
 
-public class ChatEndpoints
+public class AgentController
 {
     
 }
