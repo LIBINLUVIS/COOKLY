@@ -14,6 +14,7 @@ public class TokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 {
     private readonly JwtSettings _settings = jwtSettings.Value;
 
+
     public (string Token, DateTime ExpiresAt) CreateToken(User user)
     {
         var expiresAt = DateTime.UtcNow.AddMinutes(_settings.ExpiryMinutes);

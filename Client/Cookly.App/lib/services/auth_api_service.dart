@@ -26,7 +26,7 @@ class AuthApiService {
 
   static final AuthApiService instance = AuthApiService._();
 
-  /// Calls `POST /api/Auth/login` with the Google profile fields and
+  /// Calls `POST /api/auth/login` with the Google profile fields and
   /// returns the issued token on success, or throws [AuthApiException]
   /// carrying the backend's own message on failure.
   Future<AuthResponse> loginWithProfile({
@@ -35,7 +35,7 @@ class AuthApiService {
     String? lastName,
     String? displayName,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/api/Auth/login');
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/auth/login');
 
     final http.Response response;
     try {

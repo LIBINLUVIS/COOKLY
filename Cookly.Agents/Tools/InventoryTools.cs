@@ -1,6 +1,45 @@
+using System.ComponentModel;
+using Cookly.Data.DTOS;
+
 namespace Cookly.Agents.Tools;
 
-public class InventoryTools
+/// <summary>
+/// Tools exposed to InventoryAgent. Removal is wrapped in <c>ApprovalRequiredAIFunction</c> by
+/// the caller, so that call always pauses the workflow for human approval before running.
+/// </summary>
+public class InventoryTools(List<PantryItem> pantryItems, int expiryWindowDays)
 {
-    
+    [Description("Lists pantry items that have already expired.")]
+    public string CheckExpiredItems()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var expired = pantryItems.Where(i => i.ExpiryDate < today).Select(i => i.Name).ToList();
+        return expired.Count == 0 ? "No items have expired." : string.Join(", ", expired);
+    }
+
+    [Description(
+        "Lists pantry items expiring within the next few days but not yet expired, each with " +
+        "the exact number of days left, e.g. 'Milk (1 day left)'. Use the day count, not the " +
+        "item name alone, to decide whether an item needs to be removed.")]
+    public string CheckExpiringSoonItems()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var expiringSoon = pantryItems
+            .Select(i => new { i.Name, DaysUntilExpiry = i.ExpiryDate.DayNumber - today.DayNumber })
+            .Where(i => i.DaysUntilExpiry > 0 && i.DaysUntilExpiry <= expiryWindowDays)
+            .Select(i => $"{i.Name} ({i.DaysUntilExpiry} day{(i.DaysUntilExpiry == 1 ? "" : "s")} left)")
+            .ToList();
+        return expiringSoon.Count == 0 ? "No items are expiring soon." : string.Join(", ", expiringSoon);
+    }
+
+    [Description("Removes an item from the pantry inventory by its exact name.")]
+    public string RemoveInventoryItem(
+        [Description("The exact name of the pantry item to remove.")] string itemName)
+    {
+        var removed = pantryItems.RemoveAll(i =>
+            string.Equals(i.Name, itemName, StringComparison.OrdinalIgnoreCase));
+        return removed > 0
+            ? $"Removed {itemName} from the inventory."
+            : $"No item named '{itemName}' was found.";
+    }
 }

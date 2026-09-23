@@ -1,5 +1,5 @@
 /// Mirrors the backend's `AuthResponseDto` — the payload inside a
-/// successful `ServiceResponse` from `POST /api/Auth/login`.
+/// successful `ServiceResponse` from `POST /api/auth/login`.
 class AuthResponse {
   const AuthResponse({required this.token, required this.tokenExpiry});
 

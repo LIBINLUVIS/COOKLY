@@ -1,11 +1,16 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using Azure.AI.Projects;
+using Azure.Identity;
 using Cookly.Api.Endpoints;
 using Cookly.Business.IServices;
 using Cookly.Business.Services;
 using Cookly.Data;
+using Cookly.Data.DTOS;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 
@@ -33,6 +38,8 @@ builder.Services.AddDbContext<CooklyDbContext>(options =>
                 errorNumbersToAdd: null);
         });
 });
+
+builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 
 var issuer = builder.Configuration["JwtSettings:Issuer"];
 var audience = builder.Configuration["JwtSettings:Audience"];
@@ -66,6 +73,22 @@ builder.Services.AddControllers();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+//agents settings
+builder.Services.AddSingleton(sp =>
+{
+    var endpoint = builder.Configuration["AzureAIFoundry:Endpoint"]!;
+    var deploymentName = builder.Configuration["AzureAIFoundry:DeploymentName"]!;
+#pragma warning disable OPENAI001
+    return new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+        .GetProjectOpenAIClient()
+        .GetProjectResponsesClient()
+        .AsIChatClient(deploymentName);
+#pragma warning restore OPENAI001
+});
+
+// In-memory checkpointing — singleton so start/respond share the same store
+builder.Services.AddSingleton(CheckpointManager.CreateInMemory());
+builder.Services.AddSingleton<IRunStateStore, InMemoryRunStateStore>();
 
 var app = builder.Build();
 
@@ -90,6 +113,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseHttpsRedirection();
 
+app.MapControllers();
 
 app.MapAuthEndpoints();
 
