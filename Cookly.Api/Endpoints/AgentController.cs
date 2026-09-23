@@ -10,17 +10,13 @@ namespace Cookly.Api.Endpoints;
 
 [ApiController]
 [Route("meal-plan")]
-public class AgentController(CheckpointManager checkpointManager,
-    IRunStateStore runStateStore,
-    IChatClient chatClient) : ControllerBase
+public class AgentController(IConversationStateStore conversationStateStore, IChatClient chatClient) : ControllerBase
 {
     private const int ExpiryWindowDays = 3;
 
-    // The decision boundary InventoryAgent is told to apply: at or below this many days left,
-    // removal is mandatory. This is intentionally tighter than ExpiryWindowDays (which only
-    // controls how far ahead CheckExpiringSoonItems looks) so items just inside the "soon"
-    // window (like Yogurt at 3 days) get flagged for awareness without forcing removal.
-    private const int RemovalThresholdDays = 2;
+    private const string InventoryAgentId = "inventory-agent";
+    private const string NutritionAgentId = "nutrition-agent";
+    private const string CookAgentId = "cook-agent";
 
     private static List<PantryItem> GetDummyPantryItems()
     {
@@ -36,89 +32,123 @@ public class AgentController(CheckpointManager checkpointManager,
     }
 
     /// <summary>
-    /// Sequential orchestration: InventoryAgent -> NutritionAgent -> CookAgent. Each agent
-    /// hands its full response to the next. InventoryAgent's item-removal tool is wrapped in
-    /// ApprovalRequiredAIFunction, so the workflow pauses for human approval before it runs;
-    /// the other tools are plain and never pause.
+    /// Handoff orchestration: InventoryAgent -&gt; NutritionAgent -&gt; CookAgent, each restricted to a
+    /// single handoff target so the flow still runs in that fixed order. Unlike sequential
+    /// orchestration, Handoff pauses for free-form user input whenever an agent responds without
+    /// handing off — that's how InventoryAgent asks "should I remove these?" and gets a plain-text
+    /// reply instead of a structural yes/no. NutritionAgent gets autonomous mode as a safety net so
+    /// a missed handoff call doesn't wrongly surface as a question to the user.
     /// </summary>
     private Workflow BuildWorkflow()
     {
         var inventoryTools = new InventoryTools(GetDummyPantryItems(), ExpiryWindowDays);
         var nutritionTools = new NutritionTools();
 
-        // Explicit, stable Ids are required here: checkpoint restore matches agents by Id, and
-        // BuildWorkflow() is called fresh on every request (StartMealPlan and
-        // ApproveMealPlanTool both call it independently). Without a fixed Id, ChatClientAgent
-        // auto-generates a new one each time, and resuming a checkpoint built against the
-        // previous instance's Ids fails with "checkpoint is not compatible with the workflow".
+        // Explicit, stable Ids: BuildWorkflow() runs fresh on every request, and Handoff routing
+        // depends on matching agent identities across runs (see Microsoft's own note on
+        // Rehydrating from Checkpoints).
         ChatClientAgent inventoryAgent = new(chatClient, new ChatClientAgentOptions
         {
-            Id = "inventory-agent",
+            Id = InventoryAgentId,
             Name = "InventoryAgent",
-            Description = "Reviews pantry inventory and removes expired items",
+            Description = "Reviews pantry inventory, asks the user about expired or expiring items, and removes what they approve",
             ChatOptions = new ChatOptions
             {
                 Instructions =
-                    "You are an inventory manager for a home kitchen. Follow this exact procedure " +
-                    "and do not deviate from it:\n" +
-                    "1. Call CheckExpiredItems. Every item it returns has already expired — call " +
-                    "RemoveInventoryItem for each one. This is mandatory, not a judgement call.\n" +
-                    $"2. Call CheckExpiringSoonItems. It returns each item together with its exact " +
-                    $"number of days left. For every item with {RemovalThresholdDays} day(s) left " +
-                    $"or fewer, call RemoveInventoryItem for it — same as expired items, this is " +
-                    $"mandatory. For items with more than {RemovalThresholdDays} days left, do not " +
-                    "remove them; just note them in your summary as expiring soon.\n" +
-                    "3. Never describe a removal in your summary without actually calling " +
-                    "RemoveInventoryItem for it — only the tool call itself lets a human approve " +
-                    "or reject the action; mentioning it in text alone changes nothing.\n" +
-                    "4. Finish with a summary of the final pantry contents (after any removals) " +
-                    "for the next agent, including which items you flagged as expiring soon but " +
-                    "did not remove.",
+                    "You are an inventory manager for a home kitchen. Follow this procedure:\n" +
+                    "1. Call CheckExpiredItems and CheckExpiringSoonItems.\n" +
+                    "2. If both return no items, skip straight to step 4.\n" +
+                    "3. Otherwise, tell the user exactly which items are expired or expiring soon " +
+                    "(with days left for the expiring ones) and ask which, if any, they'd like you " +
+                    "to remove. Do not call RemoveInventoryItem yet, and do not hand off yet — end " +
+                    "your turn here and wait for their reply.\n" +
+                    "   When the user replies, match what they said against the item names you " +
+                    "listed and call RemoveInventoryItem once for each item they asked to remove — " +
+                    "call it multiple times in the same turn if they named multiple items. Pass only " +
+                    "the bare item name as it appears in the pantry, e.g. \"Milk\" — never include " +
+                    "the \"(N days left)\" annotation in the itemName argument, that will fail to " +
+                    "match. If they said not to remove anything, or named only some items, respect " +
+                    "that exactly; never remove an item they didn't mention.\n" +
+                    "4. Call ListPantryItems to get the accurate, complete list of what remains " +
+                    "(it includes items you never checked for expiry, like long-shelf-life staples " +
+                    "— don't rely on memory or guesswork for this). Hand off to NutritionAgent with " +
+                    "that exact list as the final pantry contents, plus anything you flagged but the " +
+                    "user chose to keep.",
                 Tools =
                 [
                     AIFunctionFactory.Create(inventoryTools.CheckExpiredItems),
                     AIFunctionFactory.Create(inventoryTools.CheckExpiringSoonItems),
-                    new ApprovalRequiredAIFunction(AIFunctionFactory.Create(inventoryTools.RemoveInventoryItem)),
+                    AIFunctionFactory.Create(inventoryTools.RemoveInventoryItem),
+                    AIFunctionFactory.Create(inventoryTools.ListPantryItems),
                 ],
-                // The model can otherwise emit several RemoveInventoryItem calls in one
-                // response (observed: three near-identical calls for the same item). Every
-                // call in a batch that contains one approval-required call also requires
-                // approval, and answering a multi-call batch across separate HTTP requests
-                // runs into rough edges in the SDK's tool-output reconstruction. One call at
-                // a time avoids that entirely.
-                AllowMultipleToolCalls = false,
             },
         });
 
         ChatClientAgent nutritionAgent = new(chatClient, new ChatClientAgentOptions
         {
-            Id = "nutrition-agent",
+            Id = NutritionAgentId,
             Name = "NutritionAgent",
             Description = "Suggests a meal based on goals, preferences, and available ingredients",
             ChatOptions = new ChatOptions
             {
                 Instructions =
                     "You are a nutrition planner. Look up the user's goals and preferences with " +
-                    "your tool, then use the pantry summary from the previous agent to suggest a " +
-                    "single suitable meal.",
-                Tools = [AIFunctionFactory.Create(nutritionTools.GetUserGoalsAndPreferences)],
+                    "your tool, then call ListPantryItems yourself to see the exact, current pantry " +
+                    "contents — do not trust InventoryAgent's summary alone, confirm it with the " +
+                    "tool. Suggest a single meal that can be made using ONLY items from that exact " +
+                    "list. Do not add, assume, or suggest any ingredient that isn't in the list — " +
+                    "no extra vegetables, spices, oil, salt, or staples unless they literally appear " +
+                    "in ListPantryItems' output.\n" +
+                    "   Treat that list as complete and certain: anything not on it — salt, oil, " +
+                    "spices, condiments, anything — is a known fact to be absent from this kitchen, " +
+                    "not a maybe. Never write hedging phrases like \"if available\" or \"if you have " +
+                    "it\" about an unlisted ingredient; just don't mention it. If the available items " +
+                    "don't add up to an ideal meal, suggest the simplest reasonable preparation of " +
+                    "only what's there. Always hand off to CookAgent once you've suggested a meal, " +
+                    "naming exactly which pantry items it uses.",
+                Tools =
+                [
+                    AIFunctionFactory.Create(nutritionTools.GetUserGoalsAndPreferences),
+                    AIFunctionFactory.Create(inventoryTools.ListPantryItems),
+                ],
             },
         });
 
         ChatClientAgent cookAgent = new(chatClient, new ChatClientAgentOptions
         {
-            Id = "cook-agent",
+            Id = CookAgentId,
             Name = "CookAgent",
             Description = "Produces ingredients and cooking instructions",
             ChatOptions = new ChatOptions
             {
                 Instructions =
-                    "You are a cooking assistant. Given the suggested meal, produce a clear " +
-                    "ingredient list and step-by-step cooking instructions.",
+                    "You are a cooking assistant. First call ListPantryItems yourself and start " +
+                    "your response with 'Remaining pantry items: ' followed by that exact list. " +
+                    "Then produce the ingredient list and step-by-step cooking instructions for the " +
+                    "meal NutritionAgent suggested, using ONLY items from that pantry list — do not " +
+                    "include any ingredient, spice, oil, or staple that isn't literally in the " +
+                    "pantry list, even if a normal recipe would call for it.\n" +
+                    "   Treat the ListPantryItems result as complete and certain, not a guess: you " +
+                    "know for a fact that anything not on it — salt, oil, butter, spices, water, " +
+                    "vegetables, condiments, anything — is NOT in this kitchen. Never write hedging " +
+                    "phrases like \"if available\", \"if you have\", \"assuming you have\", \"you " +
+                    "might have\", or \"or if not\" about an unlisted ingredient — that treats a " +
+                    "known fact as a maybe. Simply omit that step or ingredient entirely, as if it " +
+                    "never crossed your mind, exactly like you'd never mention using a blender that " +
+                    "was never mentioned as being in the kitchen. If skipping unlisted staples " +
+                    "changes how the dish is cooked (e.g. no oil means dry-cooking, no salt means " +
+                    "unseasoned), just cook it that way without commenting on the missing ingredient. " +
+                    "If NutritionAgent's suggestion relies on something not in the pantry, drop it " +
+                    "and adapt the dish to what's actually available.",
+                Tools = [AIFunctionFactory.Create(inventoryTools.ListPantryItems)],
             },
         });
 
-        return AgentWorkflowBuilder.BuildSequential([inventoryAgent, nutritionAgent, cookAgent]);
+        return AgentWorkflowBuilder.CreateHandoffBuilderWith(inventoryAgent)
+            .WithHandoffs(inventoryAgent, [nutritionAgent])
+            .WithHandoffs(nutritionAgent, [cookAgent])
+            .WithAutonomousMode(agents: [nutritionAgent])
+            .Build();
     }
 
     [HttpPost("start")]
@@ -133,32 +163,50 @@ public class AgentController(CheckpointManager checkpointManager,
                 "expiring items, then suggest a meal and prepare cooking instructions."),
         ];
 
-        StreamingRun run = await InProcessExecution.RunStreamingAsync(
-            BuildWorkflow(), messages, checkpointManager);
+        return await RunTurnAsync(runId, messages);
+    }
+
+    [HttpPost("{runId}/respond")]
+    public async Task<IActionResult> RespondToMealPlan(string runId, [FromBody] RespondToMealPlanRequest request)
+    {
+        var messages = await conversationStateStore.LoadAsync(runId);
+        if (messages is null)
+            return NotFound(new { message = "No pending run found for this runId." });
+
+        messages.Add(new ChatMessage(ChatRole.User, request.Message));
+
+        return await RunTurnAsync(runId, messages);
+    }
+
+    /// <summary>
+    /// Runs one Handoff turn to its natural pause: either an agent finishing without handing off
+    /// (the workflow just ends — no RequestInfoEvent, unlike tool approval) or CookAgent completing
+    /// the pipeline. <paramref name="messages"/> is the full running conversation; the caller
+    /// supplies it fresh each turn since Handoff has no mid-turn checkpoint to resume from here.
+    /// </summary>
+    private async Task<IActionResult> RunTurnAsync(string runId, List<ChatMessage> messages)
+    {
+        StreamingRun run = await InProcessExecution.RunStreamingAsync(BuildWorkflow(), messages);
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
-        (string tool, IDictionary<string, object?> arguments)? pendingApproval = null;
+        string? lastAuthorName = null;
+        List<ChatMessage> finalMessages = [];
 
-        await foreach (WorkflowEvent evt in run.WatchStreamAsync(blockOnPendingRequest: false))
+        await foreach (WorkflowEvent evt in run.WatchStreamAsync())
         {
-            if (evt is RequestInfoEvent requestEvt &&
-                requestEvt.Request.TryGetDataAs(out ToolApprovalRequestContent? approval))
+            if (evt is AgentResponseUpdateEvent update)
             {
-                var toolCall = (FunctionCallContent)approval.ToolCall;
-                pendingApproval = (toolCall.Name, toolCall.Arguments);
-                continue;
+                // ExecutorId is a compound "{Name}_{id-with-underscores}" string, not the plain Id
+                // set on ChatClientAgentOptions — AuthorName is the reliable way to tell which
+                // agent produced the latest response.
+                lastAuthorName = update.Update.AuthorName;
             }
-
-            // Intermediate participants (InventoryAgent, NutritionAgent) also surface as
-            // WorkflowOutputEvent while streaming, carrying an AgentResponseUpdate chunk rather
-            // than the final List<ChatMessage> — only the true terminal output (CookAgent's)
-            // carries that. Skip anything that doesn't cast successfully.
-            if (evt is WorkflowOutputEvent outputEvt && outputEvt.As<List<ChatMessage>>() is { } finalMessages)
+            else if (evt is WorkflowOutputEvent outputEvt && outputEvt.As<List<ChatMessage>>() is { } newMessages)
             {
-                return Ok(new { runId, status = "completed", result = finalMessages.LastOrDefault()?.Text });
+                finalMessages = newMessages;
+                break;
             }
-
-            if (evt is ExecutorFailedEvent failedEvt)
+            else if (evt is ExecutorFailedEvent failedEvt)
             {
                 return StatusCode(500, new
                 {
@@ -170,77 +218,16 @@ public class AgentController(CheckpointManager checkpointManager,
             }
         }
 
-        if (pendingApproval is { } pending)
+        messages.AddRange(finalMessages.Skip(messages.Count));
+
+        if (lastAuthorName == "CookAgent")
         {
-            if (run.Checkpoints.Count > 0)
-            {
-                await runStateStore.SaveAsync(runId, run.Checkpoints.Last());
-            }
-            return Ok(new
-            {
-                runId,
-                status = "needs_approval",
-                tool = pending.tool,
-                arguments = pending.arguments,
-            });
+            return Ok(new { runId, status = "completed", result = messages.LastOrDefault()?.Text });
         }
 
-        return Ok(new { runId, status = "completed" });
-    }
-
-    [HttpPost("{runId}/approve")]
-    public async Task<IActionResult> ApproveMealPlanTool(string runId, [FromBody] bool approved)
-    {
-        var savedCheckpoint = await runStateStore.LoadAsync(runId);
-        if (savedCheckpoint is null)
-            return NotFound(new { message = "No pending run found for this runId." });
-
-        StreamingRun run = await InProcessExecution.ResumeStreamingAsync(
-            BuildWorkflow(), savedCheckpoint, checkpointManager);
-
-        // WatchStreamAsync(blockOnPendingRequest: false) ends its enumeration at each halt (a
-        // still-pending RequestInfoEvent, or the workflow genuinely idle). Answering a request
-        // only queues it "for the next superstep" (per the SDK's own doc comment) — that queued
-        // work isn't driven forward by the same enumeration, so re-open a fresh watch after any
-        // segment that answered at least one request, until a segment answers nothing new.
-        for (var i = 0; i < 10; i++)
-        {
-            var answeredAny = false;
-
-            await foreach (WorkflowEvent evt in run.WatchStreamAsync(blockOnPendingRequest: false))
-            {
-                if (evt is RequestInfoEvent requestEvt &&
-                    requestEvt.Request.TryGetDataAs(out ToolApprovalRequestContent? approval))
-                {
-                    await run.SendResponseAsync(
-                        requestEvt.Request.CreateResponse(approval.CreateResponse(approved)));
-                    answeredAny = true;
-                    continue;
-                }
-
-                if (evt is WorkflowOutputEvent outputEvt && outputEvt.As<List<ChatMessage>>() is { } finalMessages)
-                {
-                    return Ok(new { runId, status = "completed", result = finalMessages.LastOrDefault()?.Text });
-                }
-
-                if (evt is ExecutorFailedEvent failedEvt)
-                {
-                    return StatusCode(500, new
-                    {
-                        runId,
-                        status = "failed",
-                        executorId = failedEvt.ExecutorId,
-                        error = failedEvt.Data?.ToString(),
-                    });
-                }
-            }
-
-            if (!answeredAny)
-            {
-                break;
-            }
-        }
-
-        return Ok(new { runId, status = "in_progress" });
+        await conversationStateStore.SaveAsync(runId, messages);
+        return Ok(new { runId, status = "needs_user_input", message = messages.LastOrDefault()?.Text });
     }
 }
+
+public record RespondToMealPlanRequest(string Message);

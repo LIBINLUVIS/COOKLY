@@ -4,11 +4,19 @@ using Cookly.Data.DTOS;
 namespace Cookly.Agents.Tools;
 
 /// <summary>
-/// Tools exposed to InventoryAgent. Removal is wrapped in <c>ApprovalRequiredAIFunction</c> by
-/// the caller, so that call always pauses the workflow for human approval before running.
+/// Tools exposed to InventoryAgent, and (read-only) to NutritionAgent and CookAgent so they can
+/// ground meal suggestions in the actual, current pantry contents instead of relying on a
+/// paraphrased summary passed along the handoff chain.
 /// </summary>
 public class InventoryTools(List<PantryItem> pantryItems, int expiryWindowDays)
 {
+    [Description(
+        "Lists every item currently in the pantry, by exact name, reflecting any removals already " +
+        "made. This is the authoritative, current list — do not assume any item is available unless " +
+        "it appears here.")]
+    public string ListPantryItems() =>
+        pantryItems.Count == 0 ? "The pantry is empty." : string.Join(", ", pantryItems.Select(i => i.Name));
+
     [Description("Lists pantry items that have already expired.")]
     public string CheckExpiredItems()
     {

@@ -89,6 +89,7 @@ builder.Services.AddSingleton(sp =>
 // In-memory checkpointing — singleton so start/respond share the same store
 builder.Services.AddSingleton(CheckpointManager.CreateInMemory());
 builder.Services.AddSingleton<IRunStateStore, InMemoryRunStateStore>();
+builder.Services.AddSingleton<IConversationStateStore, InMemoryConversationStateStore>();
 
 var app = builder.Build();
 
