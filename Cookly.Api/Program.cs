@@ -2,6 +2,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using Azure.AI.Projects;
 using Azure.Identity;
+using Cookly.Agents.Agents;
+using Cookly.Agents.Tools;
 using Cookly.Api.Endpoints;
 using Cookly.Business.IServices;
 using Cookly.Business.Services;
@@ -73,6 +75,17 @@ builder.Services.AddControllers();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IInventoryToolsService, InventoryToolsService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
+//agents service registerations
+builder.Services.AddScoped<InventoryAgent>();
+builder.Services.AddScoped<NutritionAgent>();
+builder.Services.AddScoped<CookAgent>();
+//tools
+builder.Services.AddScoped<InventoryTools>();
+builder.Services.AddScoped<NutritionTools>();
+builder.Services.AddScoped<RecipeTools>();
+builder.Services.AddScoped<UserService>();
 //agents settings
 builder.Services.AddSingleton(sp =>
 {
@@ -90,7 +103,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(CheckpointManager.CreateInMemory());
 builder.Services.AddSingleton<IRunStateStore, InMemoryRunStateStore>();
 builder.Services.AddSingleton<IConversationStateStore, InMemoryConversationStateStore>();
-
+builder.Services.AddHttpContextAccessor();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -117,6 +130,7 @@ app.UseHttpsRedirection();
 app.MapControllers();
 
 app.MapAuthEndpoints();
+app.MapInventoryEndpoints();
 
 app.Run();
 

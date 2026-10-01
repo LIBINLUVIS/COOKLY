@@ -1,3 +1,4 @@
+using Cookly.Agents.Agents;
 using Cookly.Agents.Tools;
 using Cookly.Business.IServices;
 using Cookly.Data.DTOS;
@@ -10,13 +11,10 @@ namespace Cookly.Api.Endpoints;
 
 [ApiController]
 [Route("meal-plan")]
-public class AgentController(IConversationStateStore conversationStateStore, IChatClient chatClient) : ControllerBase
+public class AgentController(IConversationStateStore conversationStateStore, IChatClient chatClient, 
+    InventoryAgent _inventoryAgent,NutritionAgent _nutritionAgent,CookAgent _cookAgent) : ControllerBase
 {
     private const int ExpiryWindowDays = 3;
-
-    private const string InventoryAgentId = "inventory-agent";
-    private const string NutritionAgentId = "nutrition-agent";
-    private const string CookAgentId = "cook-agent";
 
     private static List<PantryItem> GetDummyPantryItems()
     {
@@ -41,13 +39,13 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
     /// </summary>
     private Workflow BuildWorkflow()
     {
-        var inventoryTools = new InventoryTools(GetDummyPantryItems(), ExpiryWindowDays);
-        var nutritionTools = new NutritionTools();
+        /*var inventoryTools = new InventoryTools();
+        var nutritionTools = new NutritionTools();*/
 
         // Explicit, stable Ids: BuildWorkflow() runs fresh on every request, and Handoff routing
         // depends on matching agent identities across runs (see Microsoft's own note on
         // Rehydrating from Checkpoints).
-        ChatClientAgent inventoryAgent = new(chatClient, new ChatClientAgentOptions
+        /*ChatClientAgent inventoryAgent = new(chatClient, new ChatClientAgentOptions
         {
             Id = InventoryAgentId,
             Name = "InventoryAgent",
@@ -82,8 +80,9 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
                     AIFunctionFactory.Create(inventoryTools.ListPantryItems),
                 ],
             },
-        });
+        });*/
 
+        /*
         ChatClientAgent nutritionAgent = new(chatClient, new ChatClientAgentOptions
         {
             Id = NutritionAgentId,
@@ -112,9 +111,9 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
                     AIFunctionFactory.Create(inventoryTools.ListPantryItems),
                 ],
             },
-        });
+        });*/
 
-        ChatClientAgent cookAgent = new(chatClient, new ChatClientAgentOptions
+        /*ChatClientAgent cookAgent = new(chatClient, new ChatClientAgentOptions
         {
             Id = CookAgentId,
             Name = "CookAgent",
@@ -142,13 +141,14 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
                     "and adapt the dish to what's actually available.",
                 Tools = [AIFunctionFactory.Create(inventoryTools.ListPantryItems)],
             },
-        });
+        });*/
 
-        return AgentWorkflowBuilder.CreateHandoffBuilderWith(inventoryAgent)
-            .WithHandoffs(inventoryAgent, [nutritionAgent])
-            .WithHandoffs(nutritionAgent, [cookAgent])
-            .WithAutonomousMode(agents: [nutritionAgent])
+        return AgentWorkflowBuilder.CreateHandoffBuilderWith(_inventoryAgent.inventoryAgent)
+            .WithHandoffs(_inventoryAgent.inventoryAgent, [_nutritionAgent.nutritionAgent])
+            .WithHandoffs(_nutritionAgent.nutritionAgent, [_cookAgent.cookAgent])
+            .WithAutonomousMode(agents: [_nutritionAgent.nutritionAgent])
             .Build();
+        
     }
 
     [HttpPost("start")]

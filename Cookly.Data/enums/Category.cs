@@ -7,5 +7,6 @@ public enum Category
     Dairy=3,
     Meats=4,
     //items like Ketchup, soy sauce etc.
-    Condiments=5
+    Condiments=5,
+    Others=6
 }
