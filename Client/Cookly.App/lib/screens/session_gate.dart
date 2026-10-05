@@ -26,14 +26,6 @@ class _SessionGateState extends State<SessionGate> {
     _sessionFuture = SessionStore.instance.read();
   }
 
-  Future<void> _signOut(BuildContext context) async {
-    await SessionStore.instance.clear();
-    if (!mounted) return;
-    setState(() {
-      _sessionFuture = Future.value(null);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<CooklySession?>(
@@ -45,11 +37,7 @@ class _SessionGateState extends State<SessionGate> {
 
         final session = snapshot.data;
         if (session != null) {
-          return HomeScreen(
-            displayName: session.displayName,
-            email: session.email,
-            onSignOut: _signOut,
-          );
+          return HomeScreen(session: session);
         }
 
         return const SplashScreen();

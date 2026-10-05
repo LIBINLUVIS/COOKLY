@@ -77,6 +77,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IInventoryToolsService, InventoryToolsService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddScoped<IAIService, AIService>();
 //agents service registerations
 builder.Services.AddScoped<InventoryAgent>();
 builder.Services.AddScoped<NutritionAgent>();

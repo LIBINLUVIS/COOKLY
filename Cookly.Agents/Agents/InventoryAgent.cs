@@ -18,7 +18,7 @@ public class InventoryAgent(IChatClient _chatClient,InventoryTools _tools)
             {
                 Instructions =
                     "You are an inventory manager for a home kitchen. Follow this procedure:\n" +
-                    "1. Call CheckExpiredItems and CheckExpiringSoonItems.\n" +
+                    "1. Call CheckExpiredItems and CheckExpiringSoonItems,respectively.\n" +
                     "2. If both return no items, skip straight to step 4.\n" +
                     "3. Otherwise, tell the user exactly which items are expired or expiring soon " +
                     "(with days left for the expiring ones) and ask which, if any, they'd like you " +

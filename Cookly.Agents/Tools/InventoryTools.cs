@@ -29,8 +29,10 @@ public class InventoryTools(IInventoryToolsService _inventoryService)
         return expired.Count == 0 ? "No items have expired." : string.Join(", ", expired);
     }*/
 
+    [Description("Lists pantry items that have already expired.")]
     public string CheckExpiredItems()
     {
+        
         return "";
     }
 

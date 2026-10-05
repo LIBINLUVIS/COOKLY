@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../models/cookly_session.dart';
-import '../../navigation/sign_out.dart';
 import '../../services/auth_api_service.dart';
 import '../../services/google_auth_service.dart';
 import '../../services/session_store.dart';
@@ -38,24 +37,17 @@ class _SignInScreenState extends State<SignInScreen> {
         displayName: googleUser.displayName,
       );
 
-      await SessionStore.instance.save(
-        CooklySession(
-          token: authResponse.token,
-          tokenExpiry: authResponse.tokenExpiry,
-          email: googleUser.email,
-          displayName: googleUser.displayName,
-        ),
+      final session = CooklySession(
+        token: authResponse.token,
+        tokenExpiry: authResponse.tokenExpiry,
+        email: googleUser.email,
+        displayName: googleUser.displayName,
       );
+      await SessionStore.instance.save(session);
       if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => HomeScreen(
-            displayName: googleUser.displayName,
-            email: googleUser.email,
-            onSignOut: signOutAndShowSplash,
-          ),
-        ),
+        MaterialPageRoute(builder: (context) => HomeScreen(session: session)),
       );
     } on GoogleSignInCancelled {
       // User dismissed the account picker; nothing to report.

@@ -27,3 +27,12 @@ public class ListItems
     public Category? Category { get; set; }
     public int ItemId { get; set; }
 }
+
+public class ItemQuantityUpdateRequestDto
+{
+    [Required(ErrorMessage="ItemId is Required")]
+    public int ItemId { get; set; }
+
+    [Required(ErrorMessage="QuantityChange is Required")]
+    public int QuantityChange { get; set; }
+}

@@ -24,7 +24,27 @@ class CooklyRadius {
   static const double sm = 4;
   static const double lg = 8;
   static const double xl = 12;
+  static const double card = 16;
+  static const double sheet = 24;
   static const double full = 9999;
+}
+
+/// Warm, low-opacity ambient shadows from the design system's elevation levels.
+class CooklyShadows {
+  CooklyShadows._();
+
+  static const List<BoxShadow> subtle = [
+    BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 1)),
+  ];
+
+  static const List<BoxShadow> card = [
+    BoxShadow(color: Color(0x0D1F2421), blurRadius: 20, spreadRadius: -2, offset: Offset(0, 4)),
+    BoxShadow(color: Color(0x08E25B38), blurRadius: 6, spreadRadius: -1, offset: Offset(0, 2)),
+  ];
+
+  static const List<BoxShadow> bottomBar = [
+    BoxShadow(color: Color(0x0D1F2421), blurRadius: 20, offset: Offset(0, -4)),
+  ];
 }
 
 class CooklyTheme {

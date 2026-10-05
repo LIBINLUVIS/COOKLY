@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config/google_auth_config.dart';
 import '../models/cookly_google_user.dart';
+import '../utils/jwt_payload.dart';
 
 /// Thrown when the user dismisses the Google account picker instead of
 /// completing sign-in.
@@ -42,7 +41,7 @@ class GoogleAuthService {
     }
 
     final idToken = account.authentication.idToken;
-    final claims = idToken == null ? const <String, dynamic>{} : _decodeIdTokenClaims(idToken);
+    final claims = idToken == null ? const <String, dynamic>{} : decodeJwtPayload(idToken);
 
     return CooklyGoogleUser(
       email: account.email,
@@ -57,18 +56,5 @@ class GoogleAuthService {
   Future<void> signOut() async {
     await _ensureInitialized();
     await GoogleSignIn.instance.signOut();
-  }
-
-  /// Decodes the payload segment of a JWT without verifying its signature.
-  /// Verification happens server-side; this is only used to read display
-  /// claims (given_name/family_name/picture) for the client UI.
-  Map<String, dynamic> _decodeIdTokenClaims(String idToken) {
-    final parts = idToken.split('.');
-    if (parts.length != 3) return const <String, dynamic>{};
-
-    final normalized = base64Url.normalize(parts[1]);
-    final payload = utf8.decode(base64Url.decode(normalized));
-    final decoded = jsonDecode(payload);
-    return decoded is Map<String, dynamic> ? decoded : const <String, dynamic>{};
   }
 }

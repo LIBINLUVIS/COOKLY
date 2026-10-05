@@ -18,6 +18,9 @@ public static class InventoryController
         
         group.MapPost("/add-item", AddItem).RequireAuthorization();
         group.MapGet("/list-item", ListItem).RequireAuthorization();
+        group.MapDelete("/delete-item/{itemId:int}", DeleteItem).RequireAuthorization();
+        group.MapPatch("/update-quantity", UpdateItemQuantity).RequireAuthorization();
+       
         return app;
     }
 
@@ -42,4 +45,29 @@ public static class InventoryController
         var result = await _inventoryService.ListItems(userId, ctk);
         return Results.Ok(result);
     }
+
+    private static async Task<IResult> DeleteItem(int itemId, IInventoryService _inventoryService, UserService _user,
+        CancellationToken ctk)
+    {
+        var userId = _user.GetUserId();
+        var result = await _inventoryService.ItemDelete(itemId, userId, ctk);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> UpdateItemQuantity([FromBody] ItemQuantityUpdateRequestDto request,
+        IInventoryService _inventoryService, UserService _user, CancellationToken ctk)
+    {
+        var (isValid, errors) = request.TryValidate();
+        if (!isValid)
+        {
+            return Results.ValidationProblem(errors);
+        }
+        var userId = _user.GetUserId();
+
+        var result = await _inventoryService.ItemQuantityUpdate(request, userId, ctk);
+
+        return Results.Ok(result);
+    }
+
+    
 }
