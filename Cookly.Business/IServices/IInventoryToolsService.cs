@@ -8,4 +8,5 @@ public interface IInventoryToolsService
     
     public Task<ServiceResponseDto<List<ListItems>>> GetExpiredItems(CancellationToken token);
     public Task<ServiceResponseDto<List<ListItems>>> GetExpiringSoonItems(CancellationToken token);
+    public Task<ServiceResponseDto<string>> RemoveInventoryItems(string ItemNames, CancellationToken token);
 }

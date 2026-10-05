@@ -155,4 +155,29 @@ public class InventoryToolsService(UserService _userService,CooklyDbContext _con
             Message = expiringSoonItems.Count == 0 ? "No items expiring soon." : null
         };
     }
+
+    public async Task<ServiceResponseDto<string>> RemoveInventoryItems(string itemNames, CancellationToken token)
+    {
+        try
+        {
+            var userId =  _userService.GetUserId();
+            var removedItems = await  _context.Items.AsNoTracking().Where(i => i.Inventory!.UserId == userId)
+                .Where(x=> itemNames.Contains(x.Name)).ExecuteDeleteAsync(token);
+
+            return new ServiceResponseDto<string>
+            {
+                Data = removedItems > 0 ? $"Items removed from the inventory {itemNames}" : $"Item not found in the inventory {itemNames}",
+                Success = true
+            };
+
+        }
+        catch (Exception ex)
+        {
+            return new ServiceResponseDto<string>
+            {
+                Data = null,
+                Success = false
+            };
+        }
+    }
 }
