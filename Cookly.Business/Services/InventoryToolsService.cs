@@ -70,8 +70,8 @@ public class InventoryToolsService(UserService _userService,CooklyDbContext _con
                 foreach (var itm in itemsNotHaveExpiryDate)
                 {
                     var itemName = itm.Name;
-                    var predictedExpiryDate = await _aiService.GetItemExpiryDateTime(itemName, token);
-                    if (predictedExpiryDate is not null)
+                    var predictedExpiryDate = await _aiService.GetItemExpiryDateTime(itemName, itm.PurchasedAt, token);
+                    if (predictedExpiryDate.Success)
                         itm.ExpiryAt = predictedExpiryDate.Data;
                 }
             }
@@ -161,12 +161,13 @@ public class InventoryToolsService(UserService _userService,CooklyDbContext _con
         try
         {
             var userId =  _userService.GetUserId();
+            var itemName = itemNames.Trim();
             var removedItems = await  _context.Items.AsNoTracking().Where(i => i.Inventory!.UserId == userId)
-                .Where(x=> itemNames.Contains(x.Name)).ExecuteDeleteAsync(token);
+                .Where(x=> x.Name == itemName).ExecuteDeleteAsync(token);
 
             return new ServiceResponseDto<string>
             {
-                Data = removedItems > 0 ? $"Items removed from the inventory {itemNames}" : $"Item not found in the inventory {itemNames}",
+                Data = removedItems > 0 ? $"Removed {itemName} from the inventory." : $"No item named '{itemName}' was found.",
                 Success = true
             };
 

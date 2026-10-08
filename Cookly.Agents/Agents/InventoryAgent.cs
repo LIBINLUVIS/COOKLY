@@ -40,8 +40,8 @@ public class InventoryAgent(IChatClient _chatClient,InventoryTools _tools)
                 [
                     AIFunctionFactory.Create(_tools.ListPantryItems),
                     AIFunctionFactory.Create(_tools.CheckExpiredItems),
-                    AIFunctionFactory.Create(_tools.CheckExpirySoonItems),
-                    AIFunctionFactory.Create(_tools.RemoveInventoryItems)
+                    AIFunctionFactory.Create(_tools.CheckExpiringSoonItems),
+                    AIFunctionFactory.Create(_tools.RemoveInventoryItem)
                 ],
             },
         });

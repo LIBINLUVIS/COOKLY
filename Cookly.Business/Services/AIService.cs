@@ -10,7 +10,7 @@ public class AIService(IChatClient _chatClient) : IAIService
 {
     private const int MaxShelfLifeDays = 3650;
 
-    public async Task<ServiceResponseDto<DateTime>> GetItemExpiryDateTime(string ItemName, CancellationToken token)
+    public async Task<ServiceResponseDto<DateTime>> GetItemExpiryDateTime(string ItemName, DateTime purchasedAt, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(ItemName))
         {
@@ -38,7 +38,7 @@ public class AIService(IChatClient _chatClient) : IAIService
 
         return new ServiceResponseDto<DateTime>
         {
-            Data = DateTime.UtcNow.AddDays(days),
+            Data = purchasedAt.AddDays(days),
             Success = true,
             Message = "Expiry predicted successfully"
         };

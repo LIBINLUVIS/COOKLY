@@ -1,18 +1,23 @@
 using Cookly.Agents.Agents;
 using Cookly.Agents.Tools;
 using Cookly.Business.IServices;
+using Cookly.Business.Services;
 using Cookly.Data.DTOS;
+using Cookly.Data.enums;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 
 namespace Cookly.Api.Endpoints;
 
 [ApiController]
+[Authorize]
 [Route("meal-plan")]
 public class AgentController(IConversationStateStore conversationStateStore, IChatClient chatClient, 
-    InventoryAgent _inventoryAgent,NutritionAgent _nutritionAgent,CookAgent _cookAgent) : ControllerBase
+    InventoryAgent _inventoryAgent,NutritionAgent _nutritionAgent,CookAgent _cookAgent,
+    UserService _userService, MealPlanContext _mealPlan) : ControllerBase
 {
     private const int ExpiryWindowDays = 3;
 
@@ -146,36 +151,43 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
         return AgentWorkflowBuilder.CreateHandoffBuilderWith(_inventoryAgent.inventoryAgent)
             .WithHandoffs(_inventoryAgent.inventoryAgent, [_nutritionAgent.nutritionAgent])
             .WithHandoffs(_nutritionAgent.nutritionAgent, [_cookAgent.cookAgent])
-            .WithAutonomousMode(agents: [_nutritionAgent.nutritionAgent])
             .Build();
         
     }
 
     [HttpPost("start")]
-    public async Task<IActionResult> StartMealPlan()
+    public async Task<IActionResult> StartMealPlan([FromBody] StartMealPlanRequest request)
     {
+        if (request.MealType is not { } mealType || !Enum.IsDefined(mealType))
+            return BadRequest(new { message = "mealType is required: 1 (Breakfast), 2 (Lunch) or 3 (Dinner)." });
+
+        var userId = _userService.GetUserId();
+        if (userId <= 0)
+            return Unauthorized();
+
         var runId = Guid.NewGuid().ToString();
 
         List<ChatMessage> messages =
         [
             new(ChatRole.User,
-                "Plan tonight's dinner from my pantry. Review the inventory, handle any expired or " +
-                "expiring items, then suggest a meal and prepare cooking instructions."),
+                $"Plan my {mealType} from my pantry. Review the inventory, handle any expired or " +
+                $"expiring items, then suggest a new {mealType} meal and prepare cooking instructions."),
         ];
 
-        return await RunTurnAsync(runId, messages);
+        return await RunTurnAsync(runId, new ConversationState(userId, mealType, messages));
     }
 
     [HttpPost("{runId}/respond")]
     public async Task<IActionResult> RespondToMealPlan(string runId, [FromBody] RespondToMealPlanRequest request)
     {
-        var messages = await conversationStateStore.LoadAsync(runId);
-        if (messages is null)
+        var state = await conversationStateStore.LoadAsync(runId);
+        // Same response for "not found" and "someone else's run" so run ids can't be probed.
+        if (state is null || state.UserId != _userService.GetUserId())
             return NotFound(new { message = "No pending run found for this runId." });
 
-        messages.Add(new ChatMessage(ChatRole.User, request.Message));
+        state.Messages.Add(new ChatMessage(ChatRole.User, request.Message));
 
-        return await RunTurnAsync(runId, messages);
+        return await RunTurnAsync(runId, state);
     }
 
     /// <summary>
@@ -184,8 +196,11 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
     /// the pipeline. <paramref name="messages"/> is the full running conversation; the caller
     /// supplies it fresh each turn since Handoff has no mid-turn checkpoint to resume from here.
     /// </summary>
-    private async Task<IActionResult> RunTurnAsync(string runId, List<ChatMessage> messages)
+    private async Task<IActionResult> RunTurnAsync(string runId, ConversationState state)
     {
+        _mealPlan.MealType = state.MealType;
+        var messages = state.Messages;
+
         StreamingRun run = await InProcessExecution.RunStreamingAsync(BuildWorkflow(), messages);
         await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
 
@@ -220,14 +235,27 @@ public class AgentController(IConversationStateStore conversationStateStore, ICh
 
         messages.AddRange(finalMessages.Skip(messages.Count));
 
+        if (_mealPlan.RefillRequired)
+        {
+            await conversationStateStore.RemoveAsync(runId);
+            var items = _mealPlan.SuggestedItemsToBuy;
+            var message = $"There is no new meal to suggest for this {state.MealType}. " +
+                          "Please refill your inventory with sufficient items." +
+                          (items.Count > 0 ? $" Suggested items to buy: {string.Join(", ", items)}." : "");
+            return Ok(new { runId, status = "refill_required", message, suggestedItems = items });
+        }
+
         if (lastAuthorName == "CookAgent")
         {
+            await conversationStateStore.RemoveAsync(runId);
             return Ok(new { runId, status = "completed", result = messages.LastOrDefault()?.Text });
         }
 
-        await conversationStateStore.SaveAsync(runId, messages);
+        await conversationStateStore.SaveAsync(runId, state);
         return Ok(new { runId, status = "needs_user_input", message = messages.LastOrDefault()?.Text });
     }
 }
 
 public record RespondToMealPlanRequest(string Message);
+
+public record StartMealPlanRequest(Meal? MealType);

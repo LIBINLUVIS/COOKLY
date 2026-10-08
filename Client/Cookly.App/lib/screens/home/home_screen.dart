@@ -8,6 +8,8 @@ import '../../widgets/cookly_bottom_nav.dart';
 import '../../widgets/cookly_chip.dart';
 import '../../widgets/cookly_top_bar.dart';
 import '../../widgets/profile_sheet.dart';
+import '../../models/meal_type.dart';
+import '../meal_plan/meal_prep_screen.dart';
 import '../pantry/pantry_screen.dart';
 
 /// Kitchen dashboard. Only the greeting is live; the meal selector, pantry
@@ -18,8 +20,16 @@ class HomeScreen extends StatelessWidget {
   final CooklySession session;
 
   void _openPantry(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => PantryScreen(session: session)));
+  }
+
+  void _openMealPrep(BuildContext context, MealType mealType) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PantryScreen(session: session)),
+      MaterialPageRoute(
+        builder: (_) => MealPrepScreen(session: session, mealType: mealType),
+      ),
     );
   }
 
@@ -65,7 +75,9 @@ class HomeScreen extends StatelessWidget {
                 children: [
                   _GreetingSection(firstName: session.firstName),
                   const SizedBox(height: 12),
-                  const _PrepareMealCard(),
+                  _PrepareMealCard(
+                    onMealSelected: (meal) => _openMealPrep(context, meal),
+                  ),
                   const SizedBox(height: CooklySpacing.md),
                   _PantrySummaryCard(onManage: () => _openPantry(context)),
                   const SizedBox(height: CooklySpacing.md),
@@ -146,7 +158,9 @@ class _GreetingSection extends StatelessWidget {
 }
 
 class _PrepareMealCard extends StatelessWidget {
-  const _PrepareMealCard();
+  const _PrepareMealCard({required this.onMealSelected});
+
+  final ValueChanged<MealType> onMealSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -179,7 +193,10 @@ class _PrepareMealCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Prepare New Meal', style: CooklyTextStyles.headlineSm),
+                    Text(
+                      'Prepare New Meal',
+                      style: CooklyTextStyles.headlineSm,
+                    ),
                     Text(
                       'Tap a meal category to activate AI curation',
                       style: CooklyTextStyles.bodySm,
@@ -191,49 +208,57 @@ class _PrepareMealCard extends StatelessWidget {
                 label: 'AI Cook',
                 background: CooklyColors.primaryFixed.withValues(alpha: 0.6),
                 foreground: CooklyColors.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                textStyle: CooklyTextStyles.labelSm.copyWith(fontWeight: FontWeight.w800),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                textStyle: CooklyTextStyles.labelSm.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          const IntrinsicHeight(
+          IntrinsicHeight(
             child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _MealTile(
-                  icon: Icons.wb_twilight,
-                  iconBackground: CooklyColors.tertiaryFixed,
-                  iconColor: CooklyColors.onTertiaryFixed,
-                  title: 'Breakfast',
-                  subtitle: 'Fresh & Energize',
-                  badgeColor: CooklyColors.primary,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _MealTile(
+                    onTap: () => onMealSelected(MealType.breakfast),
+                    icon: Icons.wb_twilight,
+                    iconBackground: CooklyColors.tertiaryFixed,
+                    iconColor: CooklyColors.onTertiaryFixed,
+                    title: 'Breakfast',
+                    subtitle: 'Fresh & Energize',
+                    badgeColor: CooklyColors.primary,
+                  ),
                 ),
-              ),
-              SizedBox(width: CooklySpacing.sm),
-              Expanded(
-                child: _MealTile(
-                  icon: Icons.wb_sunny_outlined,
-                  iconBackground: CooklyColors.secondaryContainer,
-                  iconColor: CooklyColors.onSecondaryContainer,
-                  title: 'Lunch',
-                  subtitle: 'Quick & Nourish',
-                  badgeColor: CooklyColors.secondary,
+                const SizedBox(width: CooklySpacing.sm),
+                Expanded(
+                  child: _MealTile(
+                    onTap: () => onMealSelected(MealType.lunch),
+                    icon: Icons.wb_sunny_outlined,
+                    iconBackground: CooklyColors.secondaryContainer,
+                    iconColor: CooklyColors.onSecondaryContainer,
+                    title: 'Lunch',
+                    subtitle: 'Quick & Nourish',
+                    badgeColor: CooklyColors.secondary,
+                  ),
                 ),
-              ),
-              SizedBox(width: CooklySpacing.sm),
-              Expanded(
-                child: _MealTile(
-                  icon: Icons.nights_stay_outlined,
-                  iconBackground: CooklyColors.primaryFixed,
-                  iconColor: CooklyColors.onPrimaryFixed,
-                  title: 'Dinner',
-                  subtitle: 'Warm Comfort',
-                  badgeColor: CooklyColors.primary,
+                const SizedBox(width: CooklySpacing.sm),
+                Expanded(
+                  child: _MealTile(
+                    onTap: () => onMealSelected(MealType.dinner),
+                    icon: Icons.nights_stay_outlined,
+                    iconBackground: CooklyColors.primaryFixed,
+                    iconColor: CooklyColors.onPrimaryFixed,
+                    title: 'Dinner',
+                    subtitle: 'Warm Comfort',
+                    badgeColor: CooklyColors.primary,
+                  ),
                 ),
-              ),
-            ],
+              ],
             ),
           ),
         ],
@@ -244,6 +269,7 @@ class _PrepareMealCard extends StatelessWidget {
 
 class _MealTile extends StatelessWidget {
   const _MealTile({
+    required this.onTap,
     required this.icon,
     required this.iconBackground,
     required this.iconColor,
@@ -252,6 +278,7 @@ class _MealTile extends StatelessWidget {
     required this.badgeColor,
   });
 
+  final VoidCallback onTap;
   final IconData icon;
   final Color iconBackground;
   final Color iconColor;
@@ -269,7 +296,7 @@ class _MealTile extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () {},
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
           child: Column(
@@ -277,20 +304,30 @@ class _MealTile extends StatelessWidget {
               Container(
                 width: 44,
                 height: 44,
-                decoration: BoxDecoration(color: iconBackground, shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  shape: BoxShape.circle,
+                ),
                 child: Icon(icon, size: 22, color: iconColor),
               ),
               const SizedBox(height: 4),
               FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(title, maxLines: 1, style: CooklyTextStyles.headlineSm.copyWith(fontSize: 16)),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  style: CooklyTextStyles.headlineSm.copyWith(fontSize: 16),
+                ),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
                 maxLines: 2,
-                style: CooklyTextStyles.bodySm.copyWith(fontSize: 11, height: 1.2),
+                style: CooklyTextStyles.bodySm.copyWith(
+                  fontSize: 11,
+                  height: 1.2,
+                ),
               ),
               const Spacer(),
               const SizedBox(height: CooklySpacing.sm),
@@ -346,8 +383,14 @@ class _PantrySummaryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('12 ingredients in pantry', style: CooklyTextStyles.headlineSm),
-                Text('All key staples fresh & verified', style: CooklyTextStyles.bodySm),
+                Text(
+                  '12 ingredients in pantry',
+                  style: CooklyTextStyles.headlineSm,
+                ),
+                Text(
+                  'All key staples fresh & verified',
+                  style: CooklyTextStyles.bodySm,
+                ),
               ],
             ),
           ),
@@ -358,13 +401,20 @@ class _PantrySummaryCard extends StatelessWidget {
               onTap: onManage,
               borderRadius: BorderRadius.circular(CooklyRadius.lg),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('Manage', style: CooklyTextStyles.labelMd),
                     const SizedBox(width: 2),
-                    const Icon(Icons.chevron_right, size: 16, color: CooklyColors.onSurface),
+                    const Icon(
+                      Icons.chevron_right,
+                      size: 16,
+                      color: CooklyColors.onSurface,
+                    ),
                   ],
                 ),
               ),
@@ -396,10 +446,14 @@ class _DishSearchField extends StatelessWidget {
           ),
           Expanded(
             child: TextField(
-              style: CooklyTextStyles.bodyMd.copyWith(color: CooklyColors.onSurface),
+              style: CooklyTextStyles.bodyMd.copyWith(
+                color: CooklyColors.onSurface,
+              ),
               decoration: InputDecoration(
                 hintText: 'Search past AI-suggested dishes...',
-                hintStyle: CooklyTextStyles.bodyMd.copyWith(color: CooklyColors.outline),
+                hintStyle: CooklyTextStyles.bodyMd.copyWith(
+                  color: CooklyColors.outline,
+                ),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 14),
@@ -409,7 +463,11 @@ class _DishSearchField extends StatelessWidget {
           IconButton(
             onPressed: () {},
             tooltip: 'Filter dishes',
-            icon: const Icon(Icons.tune, size: 20, color: CooklyColors.onSurfaceVariant),
+            icon: const Icon(
+              Icons.tune,
+              size: 20,
+              color: CooklyColors.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -429,7 +487,10 @@ class _RecentDishesHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Recent Dishes', style: CooklyTextStyles.headlineMd),
-              Text('Cook again from your kitchen history', style: CooklyTextStyles.bodySm),
+              Text(
+                'Cook again from your kitchen history',
+                style: CooklyTextStyles.bodySm,
+              ),
             ],
           ),
         ),
@@ -442,7 +503,12 @@ class _RecentDishesHeader extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('View all', style: CooklyTextStyles.labelMd.copyWith(color: CooklyColors.primary)),
+              Text(
+                'View all',
+                style: CooklyTextStyles.labelMd.copyWith(
+                  color: CooklyColors.primary,
+                ),
+              ),
               const Icon(Icons.chevron_right, size: 16),
             ],
           ),
@@ -490,7 +556,11 @@ class _DishCardState extends State<_DishCard> {
                     gradient: LinearGradient(
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
-                      colors: [Color(0x80000000), Color(0x1A000000), Color(0x00000000)],
+                      colors: [
+                        Color(0x80000000),
+                        Color(0x1A000000),
+                        Color(0x00000000),
+                      ],
                     ),
                   ),
                 ),
@@ -503,15 +573,25 @@ class _DishCardState extends State<_DishCard> {
                         label: dish.meal,
                         background: overlayChipColor,
                         foreground: CooklyColors.onSurface,
-                        leading: Icon(dish.mealIcon, size: 15, color: dish.mealIconColor),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        leading: Icon(
+                          dish.mealIcon,
+                          size: 15,
+                          color: dish.mealIconColor,
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
                       ),
                       const SizedBox(width: CooklySpacing.sm),
                       CooklyChip(
                         label: dish.tag,
                         background: dish.tagBackground,
                         foreground: dish.tagForeground,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                       ),
                     ],
                   ),
@@ -524,8 +604,15 @@ class _DishCardState extends State<_DishCard> {
                     background: overlayChipColor,
                     foreground: CooklyColors.onSurface,
                     textStyle: CooklyTextStyles.labelMd,
-                    leading: const Icon(Icons.schedule, size: 16, color: CooklyColors.primary),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    leading: const Icon(
+                      Icons.schedule,
+                      size: 16,
+                      color: CooklyColors.primary,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                   ),
                 ),
               ],
@@ -544,7 +631,10 @@ class _DishCardState extends State<_DishCard> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(dish.name, style: CooklyTextStyles.headlineMd),
-                          Text(dish.description, style: CooklyTextStyles.bodySm),
+                          Text(
+                            dish.description,
+                            style: CooklyTextStyles.bodySm,
+                          ),
                         ],
                       ),
                     ),
@@ -554,7 +644,9 @@ class _DishCardState extends State<_DishCard> {
                       icon: Icon(
                         _isStarred ? Icons.star : Icons.star_border,
                         size: 22,
-                        color: _isStarred ? CooklyColors.primary : CooklyColors.outline,
+                        color: _isStarred
+                            ? CooklyColors.primary
+                            : CooklyColors.outline,
                       ),
                     ),
                   ],
@@ -569,7 +661,9 @@ class _DishCardState extends State<_DishCard> {
                     for (final ingredient in dish.pantryIngredients)
                       CooklyChip(
                         label: ingredient,
-                        background: CooklyColors.secondaryContainer.withValues(alpha: 0.6),
+                        background: CooklyColors.secondaryContainer.withValues(
+                          alpha: 0.6,
+                        ),
                         foreground: CooklyColors.onSecondaryContainer,
                       ),
                   ],
@@ -577,12 +671,18 @@ class _DishCardState extends State<_DishCard> {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    Icon(dish.footerIcon, size: 16, color: CooklyColors.secondary),
+                    Icon(
+                      dish.footerIcon,
+                      size: 16,
+                      color: CooklyColors.secondary,
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
                         dish.footer,
-                        style: CooklyTextStyles.labelSm.copyWith(color: CooklyColors.secondary),
+                        style: CooklyTextStyles.labelSm.copyWith(
+                          color: CooklyColors.secondary,
+                        ),
                       ),
                     ),
                     FilledButton(
@@ -634,7 +734,8 @@ class _DishImage extends StatelessWidget {
       url,
       fit: BoxFit.cover,
       errorBuilder: (_, _, _) => placeholder,
-      loadingBuilder: (_, child, progress) => progress == null ? child : placeholder,
+      loadingBuilder: (_, child, progress) =>
+          progress == null ? child : placeholder,
     );
   }
 }
@@ -645,7 +746,9 @@ void _showRecentDishesSheet(BuildContext context) {
     isScrollControlled: true,
     backgroundColor: CooklyColors.surface,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(CooklyRadius.sheet)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(CooklyRadius.sheet),
+      ),
     ),
     builder: (sheetContext) => SafeArea(
       child: Padding(
@@ -679,8 +782,14 @@ void _showRecentDishesSheet(BuildContext context) {
                 IconButton.filledTonal(
                   onPressed: () => Navigator.of(sheetContext).pop(),
                   tooltip: 'Close recent dishes',
-                  style: IconButton.styleFrom(backgroundColor: CooklyColors.surfaceContainer),
-                  icon: const Icon(Icons.close, size: 20, color: CooklyColors.onSurface),
+                  style: IconButton.styleFrom(
+                    backgroundColor: CooklyColors.surfaceContainer,
+                  ),
+                  icon: const Icon(
+                    Icons.close,
+                    size: 20,
+                    color: CooklyColors.onSurface,
+                  ),
                 ),
               ],
             ),
@@ -699,7 +808,11 @@ void _showRecentDishesSheet(BuildContext context) {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(CooklyRadius.xl),
-                        child: SizedBox(width: 56, height: 56, child: _DishImage(url: dish.imageUrl)),
+                        child: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: _DishImage(url: dish.imageUrl),
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -721,7 +834,11 @@ void _showRecentDishesSheet(BuildContext context) {
                           ],
                         ),
                       ),
-                      const Icon(Icons.arrow_forward_ios, size: 18, color: CooklyColors.outline),
+                      const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 18,
+                        color: CooklyColors.outline,
+                      ),
                     ],
                   ),
                 ),
@@ -770,7 +887,8 @@ class _DummyDish {
 const _dummyDishes = [
   _DummyDish(
     name: 'Apple Banana Oats Bowl',
-    description: 'Cinnamon rolled oats, fresh honeycrisp apple & toasted almonds',
+    description:
+        'Cinnamon rolled oats, fresh honeycrisp apple & toasted almonds',
     meal: 'Breakfast',
     mealIcon: Icons.wb_twilight,
     mealIconColor: CooklyColors.tertiary,

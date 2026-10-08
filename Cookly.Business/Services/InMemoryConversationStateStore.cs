@@ -1,19 +1,24 @@
 using System.Collections.Concurrent;
 using Cookly.Business.IServices;
-using Microsoft.Extensions.AI;
 
 namespace Cookly.Business.Services;
 
 public sealed class InMemoryConversationStateStore : IConversationStateStore
 {
-    private readonly ConcurrentDictionary<string, List<ChatMessage>> _store = new();
+    private readonly ConcurrentDictionary<string, ConversationState> _store = new();
 
-    public Task SaveAsync(string runId, List<ChatMessage> messages)
+    public Task SaveAsync(string runId, ConversationState state)
     {
-        _store[runId] = messages;
+        _store[runId] = state;
         return Task.CompletedTask;
     }
 
-    public Task<List<ChatMessage>?> LoadAsync(string runId) =>
-        Task.FromResult(_store.TryGetValue(runId, out var messages) ? messages : null);
+    public Task<ConversationState?> LoadAsync(string runId) =>
+        Task.FromResult(_store.TryGetValue(runId, out var state) ? state : null);
+
+    public Task RemoveAsync(string runId)
+    {
+        _store.TryRemove(runId, out _);
+        return Task.CompletedTask;
+    }
 }

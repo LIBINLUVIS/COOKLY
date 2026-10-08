@@ -5,6 +5,7 @@ using Azure.Identity;
 using Cookly.Agents.Agents;
 using Cookly.Agents.Tools;
 using Cookly.Api.Endpoints;
+using Cookly.Api.Services;
 using Cookly.Business.IServices;
 using Cookly.Business.Services;
 using Cookly.Data;
@@ -78,6 +79,8 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IInventoryToolsService, InventoryToolsService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IAIService, AIService>();
+builder.Services.AddScoped<INutritionToolsService, NutritionToolsService>();
+builder.Services.AddScoped<IRecipeToolsService, RecipeToolsService>();
 //agents service registerations
 builder.Services.AddScoped<InventoryAgent>();
 builder.Services.AddScoped<NutritionAgent>();
@@ -86,6 +89,8 @@ builder.Services.AddScoped<CookAgent>();
 builder.Services.AddScoped<InventoryTools>();
 builder.Services.AddScoped<NutritionTools>();
 builder.Services.AddScoped<RecipeTools>();
+builder.Services.AddScoped<MealPlanContext>();
+builder.Services.AddScoped<MealPlanStreamService>();
 builder.Services.AddScoped<UserService>();
 //agents settings
 builder.Services.AddSingleton(sp =>

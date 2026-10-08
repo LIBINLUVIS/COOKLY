@@ -5,7 +5,7 @@ using Cookly.Data.DTOS;
 namespace Cookly.Agents.Tools;
 
 
-public class InventoryTools(IInventoryToolsService _inventorytoolService,CancellationToken token)
+public class InventoryTools(IInventoryToolsService _inventorytoolService)
 {
     /*[Description(
         "Lists every item currently in the pantry, by exact name, reflecting any removals already " +
@@ -18,14 +18,15 @@ public class InventoryTools(IInventoryToolsService _inventorytoolService,Cancell
     "Lists every item currently in the pantry, by exact name, reflecting any removals already " +
     "made. This is the authoritative, current list — do not assume any item is available unless " +
     "it appears here.")]
-    public async Task<string> ListPantryItems()
+    public async Task<string> ListPantryItems(CancellationToken token)
     {
         var inventoryItems = await _inventorytoolService.ListItems(token);
-        var itemsName = inventoryItems.Data.Count == 0
-            ? "The panty is empty."
-            : string.Join(",", inventoryItems.Data.Select(x => x.ItemName));
+        if (!inventoryItems.Success)
+            return FailureMessage("list the pantry items", inventoryItems);
 
-        return itemsName;
+        return inventoryItems.Data.Count == 0
+            ? "The pantry is empty."
+            : string.Join(", ", inventoryItems.Data.Select(x => x.ItemName));
     }
 
 
@@ -39,13 +40,15 @@ public string CheckExpiredItems()
 }*/
 
     [Description("Lists pantry items that have already expired.")]
-    public async Task<string> CheckExpiredItems()
+    public async Task<string> CheckExpiredItems(CancellationToken token)
     {
         var expiredItems = await _inventorytoolService.GetExpiredItems(token);
-        var items = expiredItems.Data.Count == 0
-            ? "Their is no expired items."
-            : string.Join(",", expiredItems.Data.Select(x => x.ItemName));
-        return items;
+        if (!expiredItems.Success)
+            return FailureMessage("check for expired items", expiredItems);
+
+        return expiredItems.Data.Count == 0
+            ? "No items have expired."
+            : string.Join(", ", expiredItems.Data.Select(x => x.ItemName));
     }
 
     /*[Description(
@@ -67,13 +70,21 @@ public string CheckExpiredItems()
     "Lists pantry items expiring within the next few days but not yet expired, each with " +
     "the exact number of days left, e.g. 'Milk (1 day left)'. Use the day count, not the " +
     "item name alone, to decide whether an item needs to be removed.")]
-    public async Task<string> CheckExpirySoonItems()
+    public async Task<string> CheckExpiringSoonItems(CancellationToken token)
     {
         var expiringSoonItems = await _inventorytoolService.GetExpiringSoonItems(token);
-        var items = expiringSoonItems.Data.Count == 0
-            ? "Their is no expired items."
-            : string.Join(",", expiringSoonItems.Data.Select(x => x.ItemName));
-        return items;
+        if (!expiringSoonItems.Success)
+            return FailureMessage("check for items expiring soon", expiringSoonItems);
+
+        if (expiringSoonItems.Data.Count == 0)
+            return "No items are expiring soon.";
+
+        var now = DateTime.UtcNow;
+        return string.Join(", ", expiringSoonItems.Data.Select(x =>
+        {
+            var daysLeft = Math.Max(1, (int)Math.Ceiling((x.ExpiredAt!.Value - now).TotalDays));
+            return $"{x.ItemName} ({daysLeft} day{(daysLeft == 1 ? "" : "s")} left)";
+        }));
     }
 
 /*
@@ -88,11 +99,19 @@ public string RemoveInventoryItem(
         : $"No item named '{itemName}' was found.";
 }*/
 
-    [Description("Removes an item from the pantry inventory by its exact name.")]
-    public async Task<string> RemoveInventoryItems(
-        [Description("The exact name of the pantry items to remove.")] string itemNames)
+    [Description("Removes one item from the pantry inventory by its exact name.")]
+    public async Task<string> RemoveInventoryItem(
+        [Description("The exact name of the pantry item to remove, as it appears in the pantry list.")] string itemName,
+        CancellationToken token)
     {
-        var result = await _inventorytoolService.RemoveInventoryItems(itemNames, token);
+        var result = await _inventorytoolService.RemoveInventoryItems(itemName, token);
+        if (!result.Success)
+            return FailureMessage($"remove '{itemName}'", result);
+
         return result.Data;
     }
+
+    private static string FailureMessage<T>(string action, ServiceResponseDto<T> response) =>
+        $"Could not {action}: {response.Message ?? response.MessageKey ?? "unknown error"}. " +
+        "Tell the user this step failed; do not assume the pantry is empty.";
 }

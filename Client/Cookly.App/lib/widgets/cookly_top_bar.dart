@@ -23,8 +23,7 @@ class CooklyTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          leading,
-          const Spacer(),
+          Expanded(child: Align(alignment: Alignment.centerLeft, child: leading)),
           Semantics(
             button: true,
             label: 'Profile',
