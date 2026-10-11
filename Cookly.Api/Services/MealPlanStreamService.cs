@@ -102,6 +102,7 @@ public class MealPlanStreamService(
                 message = $"There is no new meal to suggest for this {state.MealType}. " +
                           "Please refill your inventory with sufficient items.",
                 suggestedItems = items,
+                consideredDishes = _mealPlan.RejectedCandidates,
             }));
             return;
         }
@@ -152,6 +153,9 @@ public class MealPlanStreamService(
             : "Removing items from your pantry",
         "GetUserGoalsAndPreferences" => "Reviewing your goals & preferences",
         "GetPreviouslySuggestedMeals" => "Checking meals you've already had",
+        "CheckDishIsNew" => call.Arguments?.TryGetValue("dishName", out var dish) == true
+            ? $"Considering {dish}"
+            : "Considering a new dish",
         "ReportNoNewMealPossible" => "Putting together a shopping list",
         "SaveSuggestedDish" => "Saving your recipe",
         _ => null,
