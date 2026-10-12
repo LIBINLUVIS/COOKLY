@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/pantry_item.dart';
 import '../models/service_response.dart';
+import '../utils/dates.dart';
 import 'session_store.dart';
 
 /// Carries a message fit to show the user. [isUnauthorized] means the
@@ -35,31 +36,129 @@ class InventoryApiService {
       body,
       (data) => data is List
           ? data
-              .map((item) => PantryItem.fromJson(item as Map<String, dynamic>))
-              .toList()
+                .map(
+                  (item) => PantryItem.fromJson(item as Map<String, dynamic>),
+                )
+                .toList()
           : null,
     );
     if (!response.success) {
-      throw InventoryApiException(_messageOf(response, 'Could not load your pantry.'));
+      throw InventoryApiException(
+        _messageOf(response, 'Could not load your pantry.'),
+      );
     }
     return response.data ?? <PantryItem>[];
   }
 
-  Future<void> addItem({
+  /// Returns the new item's id. Without [expiresAt] the server estimates it in
+  /// the background and announces it on [pantryEvents].
+  Future<int?> addItem({
     required String name,
     required int quantity,
     required String unit,
     required PantryCategory category,
     DateTime? expiresAt,
   }) async {
-    final body = await _send('POST', '/api/inventory/add-item', body: {
-      'itemName': name,
-      'quantity': quantity,
-      'unit': unit,
-      'category': category.value,
-      'expiredAt': expiresAt?.toUtc().toIso8601String(),
-    });
-    _ensureSuccess(body, 'Could not add the item.');
+    final body = await _send(
+      'POST',
+      '/api/inventory/add-item',
+      body: {
+        'itemName': name,
+        'quantity': quantity,
+        'unit': unit,
+        'category': category.value,
+        'expiredAt': expiresAt?.toUtc().toIso8601String(),
+      },
+    );
+    final response = ServiceResponse<String>.fromJson(
+      body,
+      (data) => data?.toString(),
+    );
+    if (!response.success) {
+      throw InventoryApiException(
+        _messageOf(response, 'Could not add the item.'),
+      );
+    }
+    return int.tryParse(response.data ?? '');
+  }
+
+  /// Server-Sent Events from `GET /api/inventory/events`. Ends when the connection drops.
+  Stream<PantryEvent> pantryEvents() {
+    final client = http.Client();
+    late final StreamController<PantryEvent> controller;
+
+    Future<void> run() async {
+      try {
+        final session = await SessionStore.instance.read();
+        if (session == null) {
+          throw InventoryApiException(
+            'Your session has expired. Please sign in again.',
+            isUnauthorized: true,
+          );
+        }
+        final request =
+            http.Request(
+                'GET',
+                Uri.parse('${ApiConfig.baseUrl}/api/inventory/events'),
+              )
+              ..headers.addAll({
+                'Authorization': 'Bearer ${session.token}',
+                'Accept': 'text/event-stream',
+              });
+        final response = await client.send(request).timeout(_timeout);
+        if (response.statusCode == 401) {
+          throw InventoryApiException(
+            'Your session has expired. Please sign in again.',
+            isUnauthorized: true,
+          );
+        }
+        if (response.statusCode != 200) {
+          throw InventoryApiException(
+            'Pantry updates unavailable (HTTP ${response.statusCode}).',
+          );
+        }
+
+        String? eventType;
+        final data = StringBuffer();
+        final lines = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter());
+        await for (final line in lines) {
+          if (line.isEmpty) {
+            final event = eventType == null || data.isEmpty
+                ? null
+                : PantryEvent.fromSse(
+                    eventType,
+                    jsonDecode(data.toString()) as Map<String, dynamic>,
+                  );
+            if (event != null && !controller.isClosed) controller.add(event);
+            eventType = null;
+            data.clear();
+          } else if (line.startsWith('event:')) {
+            eventType = line.substring(6).trim();
+          } else if (line.startsWith('data:')) {
+            data.write(line.substring(5).trimLeft());
+          }
+        }
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.addError(
+            error is InventoryApiException
+                ? error
+                : InventoryApiException('Pantry updates disconnected: $error'),
+          );
+        }
+      } finally {
+        client.close();
+        if (!controller.isClosed) await controller.close();
+      }
+    }
+
+    controller = StreamController<PantryEvent>(
+      onListen: run,
+      onCancel: client.close,
+    );
+    return controller.stream;
   }
 
   Future<void> deleteItem(int itemId) async {
@@ -68,21 +167,32 @@ class InventoryApiService {
   }
 
   /// Applies a signed [change] and returns the server-confirmed quantity.
-  Future<int?> updateQuantity({required int itemId, required int change}) async {
-    final body = await _send('PATCH', '/api/inventory/update-quantity', body: {
-      'itemId': itemId,
-      'quantityChange': change,
-    });
-    final response = ServiceResponse<String>.fromJson(body, (data) => data?.toString());
+  Future<int?> updateQuantity({
+    required int itemId,
+    required int change,
+  }) async {
+    final body = await _send(
+      'PATCH',
+      '/api/inventory/update-quantity',
+      body: {'itemId': itemId, 'quantityChange': change},
+    );
+    final response = ServiceResponse<String>.fromJson(
+      body,
+      (data) => data?.toString(),
+    );
     if (!response.success) {
-      throw InventoryApiException(_messageOf(response, 'Could not update the quantity.'));
+      throw InventoryApiException(
+        _messageOf(response, 'Could not update the quantity.'),
+      );
     }
     return int.tryParse(response.data ?? '');
   }
 
   void _ensureSuccess(Map<String, dynamic> body, String fallback) {
     final response = ServiceResponse<Object?>.fromJson(body, (data) => data);
-    if (!response.success) throw InventoryApiException(_messageOf(response, fallback));
+    if (!response.success) {
+      throw InventoryApiException(_messageOf(response, fallback));
+    }
   }
 
   String _messageOf(ServiceResponse<Object?> response, String fallback) =>
@@ -110,7 +220,10 @@ class InventoryApiService {
 
     final http.Response response;
     try {
-      response = await request.send().then(http.Response.fromStream).timeout(_timeout);
+      response = await request
+          .send()
+          .then(http.Response.fromStream)
+          .timeout(_timeout);
     } on TimeoutException {
       throw InventoryApiException(
         'The server took too long to respond. Is the API running at ${ApiConfig.baseUrl}?',
@@ -137,10 +250,13 @@ class InventoryApiService {
       );
     }
 
-    if (response.statusCode == 400) throw InventoryApiException(_validationMessage(json));
+    if (response.statusCode == 400) {
+      throw InventoryApiException(_validationMessage(json));
+    }
     if (response.statusCode != 200) {
       throw InventoryApiException(
-        json['message'] as String? ?? 'Server returned HTTP ${response.statusCode}.',
+        json['message'] as String? ??
+            'Server returned HTTP ${response.statusCode}.',
       );
     }
     return json;
@@ -150,9 +266,46 @@ class InventoryApiService {
   String _validationMessage(Map<String, dynamic> json) {
     final errors = json['errors'];
     if (errors is Map) {
-      final messages = errors.values.expand((value) => value is List ? value : [value]);
+      final messages = errors.values.expand(
+        (value) => value is List ? value : [value],
+      );
       if (messages.isNotEmpty) return messages.join(' ');
     }
-    return json['title'] as String? ?? 'Please check the details and try again.';
+    return json['title'] as String? ??
+        'Please check the details and try again.';
   }
+}
+
+sealed class PantryEvent {
+  const PantryEvent();
+
+  static PantryEvent? fromSse(String type, Map<String, dynamic> data) {
+    final itemId = (data['itemId'] as num?)?.toInt();
+    return switch (type) {
+      'ready' => const PantryEventsConnected(),
+      'item_expiry_updated' when itemId != null => switch (parseServerDate(
+        data['expiredAt'],
+      )) {
+        final expiresAt? => ItemExpiryUpdated(itemId, expiresAt),
+        null => null,
+      },
+      'item_expiry_failed' when itemId != null => ItemExpiryFailed(itemId),
+      _ => null,
+    };
+  }
+}
+
+class PantryEventsConnected extends PantryEvent {
+  const PantryEventsConnected();
+}
+
+class ItemExpiryUpdated extends PantryEvent {
+  const ItemExpiryUpdated(this.itemId, this.expiresAt);
+  final int itemId;
+  final DateTime expiresAt;
+}
+
+class ItemExpiryFailed extends PantryEvent {
+  const ItemExpiryFailed(this.itemId);
+  final int itemId;
 }

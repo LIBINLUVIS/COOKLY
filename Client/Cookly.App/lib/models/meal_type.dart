@@ -12,9 +12,18 @@ enum MealType {
   final String label;
   final IconData icon;
 
+  static MealType? fromValue(Object? value) {
+    for (final meal in values) {
+      if (meal.value == value) return meal;
+    }
+    return null;
+  }
+
   static MealType? fromName(Object? name) {
     for (final meal in values) {
-      if (meal.label.toLowerCase() == name?.toString().toLowerCase()) return meal;
+      if (meal.label.toLowerCase() == name?.toString().toLowerCase()) {
+        return meal;
+      }
     }
     return null;
   }

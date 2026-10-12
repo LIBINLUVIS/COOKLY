@@ -7,7 +7,22 @@ import '../../theme/cookly_colors.dart';
 import '../../theme/cookly_text_styles.dart';
 import '../../theme/cookly_theme.dart';
 
-enum AddPantryItemResult { added, unauthorized }
+class AddPantryItemResult {
+  const AddPantryItemResult.added({
+    required this.itemId,
+    required this.isExpiryPending,
+  }) : isUnauthorized = false;
+  const AddPantryItemResult.unauthorized()
+    : itemId = null,
+      isExpiryPending = false,
+      isUnauthorized = true;
+
+  final int? itemId;
+
+  /// True when no shelf life was chosen and the server is estimating it.
+  final bool isExpiryPending;
+  final bool isUnauthorized;
+}
 
 /// Bottom-sheet form that posts a new item to `POST /api/inventory/add-item`.
 /// Pops with an [AddPantryItemResult], or null if the user cancels.
@@ -21,14 +36,14 @@ class AddPantryItemSheet extends StatefulWidget {
 class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
   static const _units = ['pcs', 'g', 'kg', 'ml', 'L', 'bunch', 'pack'];
 
-  /// 0 means "not sure", which sends no expiry date.
+  /// 0 means "Auto": no expiry is sent and the server estimates it in the background.
   static const _shelfLifeOptions = {
+    0: 'Auto (Cookly estimates)',
     2: '2 days (Urgent)',
     5: '5 days (Fresh)',
     10: '10 days',
     30: '30 days',
     90: '90+ days (Dry)',
-    0: 'Not sure',
   };
 
   final _formKey = GlobalKey<FormState>();
@@ -37,7 +52,7 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
 
   PantryCategory _category = PantryCategory.vegetable;
   String _unit = _units.first;
-  int _shelfLifeDays = 5;
+  int _shelfLifeDays = 0;
   bool _isSaving = false;
   String? _errorMessage;
 
@@ -56,7 +71,7 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
     });
 
     try {
-      await InventoryApiService.instance.addItem(
+      final itemId = await InventoryApiService.instance.addItem(
         name: _nameController.text.trim(),
         quantity: int.parse(_quantityController.text.trim()),
         unit: _unit,
@@ -65,11 +80,18 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
             ? null
             : DateTime.now().add(Duration(days: _shelfLifeDays)),
       );
-      if (mounted) Navigator.of(context).pop(AddPantryItemResult.added);
+      if (mounted) {
+        Navigator.of(context).pop(
+          AddPantryItemResult.added(
+            itemId: itemId,
+            isExpiryPending: _shelfLifeDays == 0,
+          ),
+        );
+      }
     } on InventoryApiException catch (error) {
       if (!mounted) return;
       if (error.isUnauthorized) {
-        Navigator.of(context).pop(AddPantryItemResult.unauthorized);
+        Navigator.of(context).pop(const AddPantryItemResult.unauthorized());
         return;
       }
       setState(() {
@@ -111,12 +133,25 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                 const SizedBox(height: CooklySpacing.md),
                 Row(
                   children: [
-                    Expanded(child: Text('Add to Pantry', style: CooklyTextStyles.headlineMd)),
+                    Expanded(
+                      child: Text(
+                        'Add to Pantry',
+                        style: CooklyTextStyles.headlineMd,
+                      ),
+                    ),
                     IconButton.filledTonal(
-                      onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                      onPressed: _isSaving
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       tooltip: 'Close',
-                      style: IconButton.styleFrom(backgroundColor: CooklyColors.surfaceContainer),
-                      icon: const Icon(Icons.close, size: 20, color: CooklyColors.onSurfaceVariant),
+                      style: IconButton.styleFrom(
+                        backgroundColor: CooklyColors.surfaceContainer,
+                      ),
+                      icon: const Icon(
+                        Icons.close,
+                        size: 20,
+                        color: CooklyColors.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -130,7 +165,8 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                     textInputAction: TextInputAction.next,
                     style: _inputStyle,
                     decoration: _decoration(hint: 'e.g. Ripe Hass Avocados'),
-                    validator: (value) => (value == null || value.trim().isEmpty)
+                    validator: (value) =>
+                        (value == null || value.trim().isEmpty)
                         ? 'Item name is required'
                         : null,
                   ),
@@ -147,12 +183,19 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                           isExpanded: true,
                           style: _inputStyle,
                           decoration: _decoration(),
-                          icon: const Icon(Icons.expand_more, color: CooklyColors.onSurfaceVariant),
+                          icon: const Icon(
+                            Icons.expand_more,
+                            color: CooklyColors.onSurfaceVariant,
+                          ),
                           items: [
                             for (final category in PantryCategory.values)
-                              DropdownMenuItem(value: category, child: Text(category.label)),
+                              DropdownMenuItem(
+                                value: category,
+                                child: Text(category.label),
+                              ),
                           ],
-                          onChanged: (value) => setState(() => _category = value ?? _category),
+                          onChanged: (value) =>
+                              setState(() => _category = value ?? _category),
                         ),
                       ),
                     ),
@@ -163,12 +206,16 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                         child: TextFormField(
                           controller: _quantityController,
                           keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           style: _inputStyle,
                           decoration: _decoration(hint: 'e.g. 2'),
                           validator: (value) {
                             final quantity = int.tryParse(value?.trim() ?? '');
-                            if (quantity == null || quantity <= 0) return 'Enter a quantity';
+                            if (quantity == null || quantity <= 0) {
+                              return 'Enter a quantity';
+                            }
                             return null;
                           },
                         ),
@@ -187,12 +234,16 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                           isExpanded: true,
                           style: _inputStyle,
                           decoration: _decoration(),
-                          icon: const Icon(Icons.expand_more, color: CooklyColors.onSurfaceVariant),
+                          icon: const Icon(
+                            Icons.expand_more,
+                            color: CooklyColors.onSurfaceVariant,
+                          ),
                           items: [
                             for (final unit in _units)
                               DropdownMenuItem(value: unit, child: Text(unit)),
                           ],
-                          onChanged: (value) => setState(() => _unit = value ?? _unit),
+                          onChanged: (value) =>
+                              setState(() => _unit = value ?? _unit),
                         ),
                       ),
                     ),
@@ -205,13 +256,20 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                           isExpanded: true,
                           style: _inputStyle,
                           decoration: _decoration(),
-                          icon: const Icon(Icons.expand_more, color: CooklyColors.onSurfaceVariant),
+                          icon: const Icon(
+                            Icons.expand_more,
+                            color: CooklyColors.onSurfaceVariant,
+                          ),
                           items: [
                             for (final option in _shelfLifeOptions.entries)
-                              DropdownMenuItem(value: option.key, child: Text(option.value)),
+                              DropdownMenuItem(
+                                value: option.key,
+                                child: Text(option.value),
+                              ),
                           ],
-                          onChanged: (value) =>
-                              setState(() => _shelfLifeDays = value ?? _shelfLifeDays),
+                          onChanged: (value) => setState(
+                            () => _shelfLifeDays = value ?? _shelfLifeDays,
+                          ),
                         ),
                       ),
                     ),
@@ -221,7 +279,9 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                   const SizedBox(height: 12),
                   Text(
                     _errorMessage!,
-                    style: CooklyTextStyles.bodySm.copyWith(color: CooklyColors.error),
+                    style: CooklyTextStyles.bodySm.copyWith(
+                      color: CooklyColors.error,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 20),
@@ -229,7 +289,9 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
                   children: [
                     Expanded(
                       child: FilledButton(
-                        onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+                        onPressed: _isSaving
+                            ? null
+                            : () => Navigator.of(context).pop(),
                         style: _buttonStyle(
                           background: CooklyColors.surfaceContainer,
                           foreground: CooklyColors.onSurface,
@@ -267,13 +329,16 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
     );
   }
 
-  TextStyle get _inputStyle => CooklyTextStyles.bodyMd.copyWith(color: CooklyColors.onSurface);
+  TextStyle get _inputStyle =>
+      CooklyTextStyles.bodyMd.copyWith(color: CooklyColors.onSurface);
 
   InputDecoration _decoration({String? hint}) {
     OutlineInputBorder border(Color color, double width) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(CooklyRadius.xl),
-          borderSide: width == 0 ? BorderSide.none : BorderSide(color: color, width: width),
-        );
+      borderRadius: BorderRadius.circular(CooklyRadius.xl),
+      borderSide: width == 0
+          ? BorderSide.none
+          : BorderSide(color: color, width: width),
+    );
 
     return InputDecoration(
       hintText: hint,
@@ -292,7 +357,10 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
     );
   }
 
-  ButtonStyle _buttonStyle({required Color background, required Color foreground}) {
+  ButtonStyle _buttonStyle({
+    required Color background,
+    required Color foreground,
+  }) {
     return FilledButton.styleFrom(
       backgroundColor: background,
       foregroundColor: foreground,
@@ -300,7 +368,9 @@ class _AddPantryItemSheetState extends State<AddPantryItemSheet> {
       disabledForegroundColor: foreground.withValues(alpha: 0.8),
       minimumSize: const Size.fromHeight(52),
       textStyle: CooklyTextStyles.labelLg,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CooklyRadius.xl)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(CooklyRadius.xl),
+      ),
     );
   }
 }
@@ -318,7 +388,9 @@ class _Field extends StatelessWidget {
       children: [
         Text(
           label,
-          style: CooklyTextStyles.labelMd.copyWith(color: CooklyColors.onSurfaceVariant),
+          style: CooklyTextStyles.labelMd.copyWith(
+            color: CooklyColors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 4),
         child,

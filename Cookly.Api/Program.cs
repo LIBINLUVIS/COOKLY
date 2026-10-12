@@ -9,6 +9,9 @@ using Cookly.Api.Services;
 using Cookly.Business.IServices;
 using Cookly.Business.Services;
 using Cookly.Data;
+using Cookly.Data.Seed;
+using Cookly.Api.Jobs;
+using Coravel;
 using Cookly.Data.DTOS;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -78,7 +81,13 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IInventoryToolsService, InventoryToolsService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddScoped<IDishService, DishService>();
 builder.Services.AddScoped<IAIService, AIService>();
+builder.Services.AddSingleton<ShelfLifeCatalog>();
+builder.Services.AddScoped<IShelfLifeService, ShelfLifeService>();
+builder.Services.AddQueue();
+builder.Services.AddTransient<FillItemExpiryJob>();
+builder.Services.AddSingleton<PantryEventHub>();
 builder.Services.AddScoped<INutritionToolsService, NutritionToolsService>();
 builder.Services.AddScoped<IRecipeToolsService, RecipeToolsService>();
 //agents service registerations
@@ -112,6 +121,25 @@ builder.Services.AddSingleton<IConversationStateStore, InMemoryConversationState
 builder.Services.AddHttpContextAccessor();
 var app = builder.Build();
 
+app.Services.ConfigureQueue()
+    .OnError(ex => app.Logger.LogError(ex, "Background queue job failed"));
+
+// Adds any missing rows from the shelf-life seed file (idempotent).
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var added = await ShelfLifeSeeder.SeedAsync(
+            scope.ServiceProvider.GetRequiredService<CooklyDbContext>(),
+            Path.Combine(AppContext.BaseDirectory, "Seed", "shelf_life_seed.json"));
+        app.Logger.LogInformation("Shelf-life seed: {Added} new rows", added);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Shelf-life seeding skipped; lookups will fall back to AI");
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -137,6 +165,7 @@ app.MapControllers();
 
 app.MapAuthEndpoints();
 app.MapInventoryEndpoints();
+app.MapDishEndpoints();
 
 app.Run();
 

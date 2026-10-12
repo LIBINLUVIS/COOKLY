@@ -56,7 +56,7 @@ public class InventoryService(CooklyDbContext _context):IInventoryService
                 Quantity = request.Quantity,
                 Unit = request.Unit,
                 PurchasedAt = DateTime.UtcNow,
-                ExpiryAt = request?.ExpiredAt ?? null,
+                ExpiryAt = request.ExpiredAt,
                 Category = request?.Category ?? Category.Others,
                 InventoryId = inventoryId
             };

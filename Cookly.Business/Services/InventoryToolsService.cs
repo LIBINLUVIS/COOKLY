@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cookly.Business.Services;
 
-public class InventoryToolsService(UserService _userService,CooklyDbContext _context,IAIService _aiService): IInventoryToolsService
+public class InventoryToolsService(UserService _userService,CooklyDbContext _context,IShelfLifeService _shelfLifeService): IInventoryToolsService
 {
     public async Task<ServiceResponseDto<List<ListItems>>> ListItems(CancellationToken token)
     {
@@ -69,10 +69,9 @@ public class InventoryToolsService(UserService _userService,CooklyDbContext _con
             {
                 foreach (var itm in itemsNotHaveExpiryDate)
                 {
-                    var itemName = itm.Name;
-                    var predictedExpiryDate = await _aiService.GetItemExpiryDateTime(itemName, itm.PurchasedAt, token);
-                    if (predictedExpiryDate.Success)
-                        itm.ExpiryAt = predictedExpiryDate.Data;
+                    var shelfLife = await _shelfLifeService.GetShelfLifeDays(itm.Name, token);
+                    if (shelfLife.Success)
+                        itm.ExpiryAt = itm.PurchasedAt.AddDays(shelfLife.Data);
                 }
             }
             //save the ai predicted items expiry to db

@@ -21,3 +21,14 @@ public class DishIngredientDto
     public string Name { get; set; } = "";
     public string? Quantity { get; set; }
 }
+
+public class DishHistoryDto
+{
+    public int DishId { get; set; }
+    public string Name { get; set; } = "";
+    public Meal Meal { get; set; }
+    public string? Goal { get; set; }
+    public DateTime SuggestedDate { get; set; }
+    public List<DishIngredientDto> Ingredients { get; set; } = [];
+    public List<string> Steps { get; set; } = [];
+}

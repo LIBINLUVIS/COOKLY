@@ -36,14 +36,14 @@ class PantryItem {
   });
 
   factory PantryItem.fromJson(Map<String, dynamic> json) => PantryItem(
-        itemId: (json['itemId'] as num).toInt(),
-        name: json['itemName'] as String? ?? '',
-        quantity: (json['quantity'] as num?)?.toInt() ?? 0,
-        unit: json['unit'] as String?,
-        purchasedAt: parseServerDate(json['purchasedAt']),
-        expiresAt: parseServerDate(json['expiredAt']),
-        category: PantryCategory.fromValue(json['category']),
-      );
+    itemId: (json['itemId'] as num).toInt(),
+    name: json['itemName'] as String? ?? '',
+    quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    unit: json['unit'] as String?,
+    purchasedAt: parseServerDate(json['purchasedAt']),
+    expiresAt: parseServerDate(json['expiredAt']),
+    category: PantryCategory.fromValue(json['category']),
+  );
 
   final int itemId;
   final String name;
@@ -66,13 +66,13 @@ class PantryItem {
     return trimmedUnit.isEmpty ? '$quantity' : '$quantity $trimmedUnit';
   }
 
-  PantryItem copyWith({int? quantity}) => PantryItem(
-        itemId: itemId,
-        name: name,
-        quantity: quantity ?? this.quantity,
-        unit: unit,
-        purchasedAt: purchasedAt,
-        expiresAt: expiresAt,
-        category: category,
-      );
+  PantryItem copyWith({int? quantity, DateTime? expiresAt}) => PantryItem(
+    itemId: itemId,
+    name: name,
+    quantity: quantity ?? this.quantity,
+    unit: unit,
+    purchasedAt: purchasedAt,
+    expiresAt: expiresAt ?? this.expiresAt,
+    category: category,
+  );
 }

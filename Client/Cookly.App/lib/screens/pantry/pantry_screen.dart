@@ -41,11 +41,60 @@ class _PantryScreenState extends State<PantryScreen> {
   final Map<int, Timer> _quantitySyncTimers = {};
   final Map<int, Future<void>> _quantitySyncsInFlight = {};
 
+  static const _eventsReconnectDelay = Duration(seconds: 3);
+  StreamSubscription<PantryEvent>? _eventsSubscription;
+  Timer? _eventsReconnectTimer;
+  bool _eventsConnectedBefore = false;
+  final Set<int> _estimatingExpiry = {};
+
+  /// Expiry dates pushed by the server, re-applied if a list load raced the update.
+  final Map<int, DateTime> _pushedExpiry = {};
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
     _loadItems();
+    _connectEvents();
+  }
+
+  void _connectEvents() {
+    _eventsSubscription?.cancel();
+    _eventsSubscription = _api.pantryEvents().listen(
+      _onPantryEvent,
+      onError: (Object error) {
+        // Unauthorized: stop; the list calls handle signing out. Other errors end the
+        // stream and onDone reconnects.
+        if (error is InventoryApiException && error.isUnauthorized) {
+          _eventsSubscription?.cancel();
+        }
+      },
+      onDone: () {
+        if (mounted) {
+          _eventsReconnectTimer = Timer(_eventsReconnectDelay, _connectEvents);
+        }
+      },
+    );
+  }
+
+  void _onPantryEvent(PantryEvent event) {
+    switch (event) {
+      case PantryEventsConnected():
+        // After a reconnect, reload in case an update was missed while offline.
+        if (_eventsConnectedBefore) _loadItems();
+        _eventsConnectedBefore = true;
+      case ItemExpiryUpdated(:final itemId, :final expiresAt):
+        _pushedExpiry[itemId] = expiresAt;
+        final index = _indexOf(itemId);
+        setState(() {
+          _estimatingExpiry.remove(itemId);
+          if (index != -1) {
+            _items[index] = _items[index].copyWith(expiresAt: expiresAt);
+          }
+        });
+      case ItemExpiryFailed(:final itemId):
+        setState(() => _estimatingExpiry.remove(itemId));
+    }
   }
 
   @override
@@ -57,6 +106,8 @@ class _PantryScreenState extends State<PantryScreen> {
     for (final itemId in _unsyncedQuantityChanges.keys.toList()) {
       _syncQuantity(itemId);
     }
+    _eventsReconnectTimer?.cancel();
+    _eventsSubscription?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -70,7 +121,12 @@ class _PantryScreenState extends State<PantryScreen> {
       final items = await _api.listItems();
       if (!mounted) return;
       setState(() {
-        _items = items;
+        _items = [
+          for (final item in items)
+            item.expiresAt == null && _pushedExpiry.containsKey(item.itemId)
+                ? item.copyWith(expiresAt: _pushedExpiry[item.itemId])
+                : item,
+        ];
         _isLoading = false;
       });
     } on InventoryApiException catch (error) {
@@ -93,16 +149,21 @@ class _PantryScreenState extends State<PantryScreen> {
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)));
+      ..showSnackBar(
+        SnackBar(behavior: SnackBarBehavior.floating, content: Text(message)),
+      );
   }
 
-  int _indexOf(int itemId) => _items.indexWhere((item) => item.itemId == itemId);
+  int _indexOf(int itemId) =>
+      _items.indexWhere((item) => item.itemId == itemId);
 
   void _applyQuantityChange(int itemId, int change) {
     final index = _indexOf(itemId);
     if (index == -1) return;
     setState(() {
-      _items[index] = _items[index].copyWith(quantity: _items[index].quantity + change);
+      _items[index] = _items[index].copyWith(
+        quantity: _items[index].quantity + change,
+      );
     });
   }
 
@@ -117,9 +178,16 @@ class _PantryScreenState extends State<PantryScreen> {
     if (change == 0) return;
 
     _applyQuantityChange(item.itemId, change);
-    _unsyncedQuantityChanges.update(item.itemId, (pending) => pending + change, ifAbsent: () => change);
+    _unsyncedQuantityChanges.update(
+      item.itemId,
+      (pending) => pending + change,
+      ifAbsent: () => change,
+    );
     _quantitySyncTimers[item.itemId]?.cancel();
-    _quantitySyncTimers[item.itemId] = Timer(_quantitySyncDelay, () => _syncQuantity(item.itemId));
+    _quantitySyncTimers[item.itemId] = Timer(
+      _quantitySyncDelay,
+      () => _syncQuantity(item.itemId),
+    );
   }
 
   /// Chains syncs per item so two PATCHes for the same item never race on the server.
@@ -129,7 +197,9 @@ class _PantryScreenState extends State<PantryScreen> {
     final next = previous.then((_) => _sendQuantityChange(itemId));
     _quantitySyncsInFlight[itemId] = next;
     next.whenComplete(() {
-      if (identical(_quantitySyncsInFlight[itemId], next)) _quantitySyncsInFlight.remove(itemId);
+      if (identical(_quantitySyncsInFlight[itemId], next)) {
+        _quantitySyncsInFlight.remove(itemId);
+      }
     });
   }
 
@@ -138,12 +208,21 @@ class _PantryScreenState extends State<PantryScreen> {
     if (change == null || change == 0) return;
 
     try {
-      final confirmed = await _api.updateQuantity(itemId: itemId, change: change);
+      final confirmed = await _api.updateQuantity(
+        itemId: itemId,
+        change: change,
+      );
       // Newer taps already applied optimistically will carry their own correction.
-      if (!mounted || confirmed == null || _unsyncedQuantityChanges.containsKey(itemId)) return;
+      if (!mounted ||
+          confirmed == null ||
+          _unsyncedQuantityChanges.containsKey(itemId)) {
+        return;
+      }
       final index = _indexOf(itemId);
       if (index != -1 && _items[index].quantity != confirmed) {
-        setState(() => _items[index] = _items[index].copyWith(quantity: confirmed));
+        setState(
+          () => _items[index] = _items[index].copyWith(quantity: confirmed),
+        );
       }
     } on InventoryApiException catch (error) {
       if (!mounted) return;
@@ -188,14 +267,19 @@ class _PantryScreenState extends State<PantryScreen> {
       isScrollControlled: true,
       backgroundColor: CooklyColors.surfaceContainerLowest,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(CooklyRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(CooklyRadius.sheet),
+        ),
       ),
       builder: (_) => const AddPantryItemSheet(),
     );
     if (!mounted || result == null) return;
-    if (result == AddPantryItemResult.unauthorized) {
+    if (result.isUnauthorized) {
       _handleUnauthorized();
       return;
+    }
+    if (result.isExpiryPending && result.itemId != null) {
+      _estimatingExpiry.add(result.itemId!);
     }
     _showMessage('Added to your pantry');
     _loadItems();
@@ -219,7 +303,9 @@ class _PantryScreenState extends State<PantryScreen> {
         if (_items.any((item) => item.category == category)) category,
     ];
     // A filter whose last item was deleted no longer has a pill; fall back to "All".
-    final activeFilter = presentCategories.contains(_categoryFilter) ? _categoryFilter : null;
+    final activeFilter = presentCategories.contains(_categoryFilter)
+        ? _categoryFilter
+        : null;
     final query = _searchController.text.trim().toLowerCase();
     final visibleItems = [
       for (final item in _items)
@@ -227,14 +313,16 @@ class _PantryScreenState extends State<PantryScreen> {
             (query.isEmpty || item.name.toLowerCase().contains(query)))
           item,
     ];
-    final urgentItems = _items
-        .where((item) => (item.daysUntilExpiry ?? 99) <= 2)
-        .toList()
-      ..sort((a, b) => a.daysUntilExpiry!.compareTo(b.daysUntilExpiry!));
+    final urgentItems =
+        _items.where((item) => (item.daysUntilExpiry ?? 99) <= 2).toList()
+          ..sort((a, b) => a.daysUntilExpiry!.compareTo(b.daysUntilExpiry!));
 
     return Scaffold(
       backgroundColor: CooklyColors.surface,
-      bottomNavigationBar: CooklyBottomNav(current: CooklyTab.pantry, onSelected: _onTabSelected),
+      bottomNavigationBar: CooklyBottomNav(
+        current: CooklyTab.pantry,
+        onSelected: _onTabSelected,
+      ),
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -244,7 +332,10 @@ class _PantryScreenState extends State<PantryScreen> {
               leading: IconButton(
                 onPressed: () => Navigator.of(context).pop(),
                 tooltip: 'Back',
-                icon: const Icon(Icons.arrow_back, color: CooklyColors.onSurface),
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: CooklyColors.onSurface,
+                ),
               ),
             ),
             Expanded(
@@ -262,7 +353,9 @@ class _PantryScreenState extends State<PantryScreen> {
                   children: [
                     _PantryHeader(
                       itemCount: _items.length,
-                      expiringSoonCount: _items.where((item) => item.isExpiringSoon).length,
+                      expiringSoonCount: _items
+                          .where((item) => item.isExpiringSoon)
+                          .length,
                       onAddItem: _openAddSheet,
                     ),
                     const SizedBox(height: CooklySpacing.md),
@@ -273,7 +366,8 @@ class _PantryScreenState extends State<PantryScreen> {
                         items: _items,
                         categories: presentCategories,
                         selected: activeFilter,
-                        onSelected: (category) => setState(() => _categoryFilter = category),
+                        onSelected: (category) =>
+                            setState(() => _categoryFilter = category),
                       ),
                     ],
                     if (urgentItems.isNotEmpty) ...[
@@ -297,7 +391,9 @@ class _PantryScreenState extends State<PantryScreen> {
       return const [
         Padding(
           padding: EdgeInsets.symmetric(vertical: 48),
-          child: Center(child: CircularProgressIndicator(color: CooklyColors.primary)),
+          child: Center(
+            child: CircularProgressIndicator(color: CooklyColors.primary),
+          ),
         ),
       ];
     }
@@ -317,7 +413,8 @@ class _PantryScreenState extends State<PantryScreen> {
         _PantryMessage(
           icon: Icons.kitchen_outlined,
           title: 'Your pantry is empty',
-          message: 'Add the ingredients you have at home so Cookly can plan meals around them.',
+          message:
+              'Add the ingredients you have at home so Cookly can plan meals around them.',
           actionLabel: 'Add Item',
           onAction: _openAddSheet,
         ),
@@ -341,7 +438,10 @@ class _PantryScreenState extends State<PantryScreen> {
             item: item,
             onDelete: () => _deleteItem(item),
             onIncrease: () => _changeQuantity(item, increase: true),
-            onDecrease: item.quantity > 0 ? () => _changeQuantity(item, increase: false) : null,
+            onDecrease: item.quantity > 0
+                ? () => _changeQuantity(item, increase: false)
+                : null,
+            isEstimatingExpiry: _estimatingExpiry.contains(item.itemId),
           ),
         ),
     ];
@@ -371,7 +471,8 @@ class _PantryHeader extends StatelessWidget {
               const SizedBox(height: 2),
               Text.rich(
                 TextSpan(
-                  text: '$itemCount ${itemCount == 1 ? 'item' : 'items'} in stock',
+                  text:
+                      '$itemCount ${itemCount == 1 ? 'item' : 'items'} in stock',
                   children: [
                     if (expiringSoonCount > 0) ...[
                       const TextSpan(text: '  •  '),
@@ -397,10 +498,15 @@ class _PantryHeader extends StatelessWidget {
           style: FilledButton.styleFrom(
             backgroundColor: CooklyColors.primary,
             foregroundColor: CooklyColors.onPrimary,
-            padding: const EdgeInsets.symmetric(horizontal: CooklySpacing.md, vertical: 10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: CooklySpacing.md,
+              vertical: 10,
+            ),
             textStyle: CooklyTextStyles.labelMd,
             elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(CooklyRadius.xl)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(CooklyRadius.xl),
+            ),
           ),
         ),
       ],
@@ -424,13 +530,21 @@ class _PantrySearchField extends StatelessWidget {
         hintStyle: CooklyTextStyles.bodyMd.copyWith(
           color: CooklyColors.onSurfaceVariant.withValues(alpha: 0.7),
         ),
-        prefixIcon: const Icon(Icons.search, size: 20, color: CooklyColors.onSurfaceVariant),
+        prefixIcon: const Icon(
+          Icons.search,
+          size: 20,
+          color: CooklyColors.onSurfaceVariant,
+        ),
         suffixIcon: controller.text.isEmpty
             ? null
             : IconButton(
                 onPressed: controller.clear,
                 tooltip: 'Clear search',
-                icon: const Icon(Icons.close, size: 18, color: CooklyColors.onSurfaceVariant),
+                icon: const Icon(
+                  Icons.close,
+                  size: 18,
+                  color: CooklyColors.onSurfaceVariant,
+                ),
               ),
         filled: true,
         fillColor: CooklyColors.surfaceContainerLow,
@@ -464,7 +578,11 @@ class _CategoryPills extends StatelessWidget {
       clipBehavior: Clip.none,
       child: Row(
         children: [
-          _pill('All (${items.length})', isSelected: selected == null, onTap: () => onSelected(null)),
+          _pill(
+            'All (${items.length})',
+            isSelected: selected == null,
+            onTap: () => onSelected(null),
+          ),
           for (final category in categories)
             _pill(
               '${category.label} (${items.where((item) => item.category == category).length})',
@@ -476,22 +594,33 @@ class _CategoryPills extends StatelessWidget {
     );
   }
 
-  Widget _pill(String label, {required bool isSelected, required VoidCallback onTap}) {
+  Widget _pill(
+    String label, {
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(right: CooklySpacing.sm),
       child: Material(
-        color: isSelected ? CooklyColors.secondary : CooklyColors.surfaceContainer,
+        color: isSelected
+            ? CooklyColors.secondary
+            : CooklyColors.surfaceContainer,
         borderRadius: BorderRadius.circular(CooklyRadius.full),
         elevation: isSelected ? 1 : 0,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(CooklyRadius.full),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: CooklySpacing.md, vertical: CooklySpacing.sm),
+            padding: const EdgeInsets.symmetric(
+              horizontal: CooklySpacing.md,
+              vertical: CooklySpacing.sm,
+            ),
             child: Text(
               label,
               style: CooklyTextStyles.labelMd.copyWith(
-                color: isSelected ? CooklyColors.onSecondary : CooklyColors.onSurfaceVariant,
+                color: isSelected
+                    ? CooklyColors.onSecondary
+                    : CooklyColors.onSurfaceVariant,
               ),
             ),
           ),
@@ -534,14 +663,21 @@ class _ExpiryAlertBanner extends StatelessWidget {
               color: CooklyColors.primaryContainer,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.timer, size: 20, color: CooklyColors.onPrimary),
+            child: const Icon(
+              Icons.timer,
+              size: 20,
+              color: CooklyColors.onPrimary,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Urgent Culinary Check', style: CooklyTextStyles.headlineSm),
+                Text(
+                  'Urgent Culinary Check',
+                  style: CooklyTextStyles.headlineSm,
+                ),
                 const SizedBox(height: 2),
                 Text(_message, style: CooklyTextStyles.bodySm),
               ],
@@ -571,7 +707,10 @@ class _PantryMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: CooklySpacing.xl, horizontal: CooklySpacing.md),
+      padding: const EdgeInsets.symmetric(
+        vertical: CooklySpacing.xl,
+        horizontal: CooklySpacing.md,
+      ),
       child: Column(
         children: [
           Container(
@@ -584,15 +723,30 @@ class _PantryMessage extends StatelessWidget {
             child: Icon(icon, size: 28, color: CooklyColors.secondary),
           ),
           const SizedBox(height: 12),
-          Text(title, style: CooklyTextStyles.headlineSm, textAlign: TextAlign.center),
+          Text(
+            title,
+            style: CooklyTextStyles.headlineSm,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 4),
-          Text(message, style: CooklyTextStyles.bodySm, textAlign: TextAlign.center),
+          Text(
+            message,
+            style: CooklyTextStyles.bodySm,
+            textAlign: TextAlign.center,
+          ),
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: CooklySpacing.md),
             TextButton(
               onPressed: onAction,
-              style: TextButton.styleFrom(foregroundColor: CooklyColors.primary),
-              child: Text(actionLabel!, style: CooklyTextStyles.labelLg.copyWith(color: CooklyColors.primary)),
+              style: TextButton.styleFrom(
+                foregroundColor: CooklyColors.primary,
+              ),
+              child: Text(
+                actionLabel!,
+                style: CooklyTextStyles.labelLg.copyWith(
+                  color: CooklyColors.primary,
+                ),
+              ),
             ),
           ],
         ],

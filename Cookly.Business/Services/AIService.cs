@@ -12,9 +12,17 @@ public class AIService(IChatClient _chatClient) : IAIService
 
     public async Task<ServiceResponseDto<DateTime>> GetItemExpiryDateTime(string ItemName, DateTime purchasedAt, CancellationToken token)
     {
+        var days = await GetShelfLifeDays(ItemName, token);
+        return days.Success
+            ? new ServiceResponseDto<DateTime> { Data = purchasedAt.AddDays(days.Data), Success = true, Message = "Expiry predicted successfully" }
+            : Fail<DateTime>(days.Message, days.MessageKey);
+    }
+
+    public async Task<ServiceResponseDto<int>> GetShelfLifeDays(string ItemName, CancellationToken token)
+    {
         if (string.IsNullOrWhiteSpace(ItemName))
         {
-            return Fail<DateTime>("Item name is required");
+            return Fail<int>("Item name is required");
         }
 
         var prediction = await AskAsync<ShelfLifePrediction>(
@@ -26,22 +34,17 @@ public class AIService(IChatClient _chatClient) : IAIService
 
         if (!prediction.Success)
         {
-            return Fail<DateTime>(prediction.Message, prediction.MessageKey);
+            return Fail<int>(prediction.Message, prediction.MessageKey);
         }
 
         var days = prediction.Data!.ShelfLifeDays;
         if (days < 0 || days > MaxShelfLifeDays)
         {
-            return Fail<DateTime>("Could not predict the expiry for this item",
+            return Fail<int>("Could not predict the expiry for this item",
                 $"AI returned an out-of-range shelf life of {days} days for '{ItemName}'");
         }
 
-        return new ServiceResponseDto<DateTime>
-        {
-            Data = purchasedAt.AddDays(days),
-            Success = true,
-            Message = "Expiry predicted successfully"
-        };
+        return new ServiceResponseDto<int> { Data = days, Success = true, Message = "Shelf life predicted successfully" };
     }
 
     /// <summary>

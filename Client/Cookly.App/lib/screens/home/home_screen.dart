@@ -1,44 +1,114 @@
 import 'package:flutter/material.dart';
 
 import '../../models/cookly_session.dart';
+import '../../models/meal_type.dart';
+import '../../models/recipe.dart';
+import '../../navigation/sign_out.dart';
+import '../../services/dish_api_service.dart';
 import '../../theme/cookly_colors.dart';
 import '../../theme/cookly_text_styles.dart';
 import '../../theme/cookly_theme.dart';
+import '../../utils/dates.dart';
 import '../../widgets/cookly_bottom_nav.dart';
 import '../../widgets/cookly_chip.dart';
 import '../../widgets/cookly_top_bar.dart';
 import '../../widgets/profile_sheet.dart';
-import '../../models/meal_type.dart';
 import '../meal_plan/meal_prep_screen.dart';
+import '../meal_plan/recipe_guide_screen.dart';
 import '../pantry/pantry_screen.dart';
 
-/// Kitchen dashboard. Only the greeting is live; the meal selector, pantry
-/// summary and recent dishes are placeholder content for now.
-class HomeScreen extends StatelessWidget {
+/// Kitchen dashboard. The greeting and Recent Dishes are live; the pantry
+/// summary card is still placeholder content.
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.session});
 
   final CooklySession session;
 
-  void _openPantry(BuildContext context) {
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  static const _homeDishLimit = 5;
+
+  final _searchController = TextEditingController();
+  List<Recipe> _dishes = [];
+  bool _isLoadingDishes = true;
+  String? _dishesError;
+
+  CooklySession get session => widget.session;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => setState(() {}));
+    _loadDishes();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadDishes() async {
+    setState(() {
+      _isLoadingDishes = true;
+      _dishesError = null;
+    });
+    try {
+      final dishes = await DishApiService.instance.history();
+      if (!mounted) return;
+      setState(() {
+        _dishes = dishes;
+        _isLoadingDishes = false;
+      });
+    } on DishApiException catch (error) {
+      if (!mounted) return;
+      if (error.isUnauthorized) {
+        signOutAndShowSplash(context);
+        return;
+      }
+      setState(() {
+        _dishesError = error.message;
+        _isLoadingDishes = false;
+      });
+    }
+  }
+
+  void _openPantry() {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => PantryScreen(session: session)));
   }
 
-  void _openMealPrep(BuildContext context, MealType mealType) {
-    Navigator.of(context).push(
+  Future<void> _openMealPrep(MealType mealType) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => MealPrepScreen(session: session, mealType: mealType),
       ),
     );
+    // A finished meal plan saves a new dish to the history.
+    if (mounted) _loadDishes();
   }
 
-  void _onTabSelected(BuildContext context, CooklyTab tab) {
+  void _openRecipe(Recipe recipe) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RecipeGuideScreen(session: session, recipe: recipe),
+      ),
+    );
+  }
+
+  void _showAllDishes() =>
+      _showRecentDishesSheet(context, _dishes, _openRecipe);
+
+  void _onTabSelected(CooklyTab tab) {
     switch (tab) {
       case CooklyTab.kitchen:
         break;
       case CooklyTab.pantry:
-        _openPantry(context);
+        _openPantry();
       case CooklyTab.profile:
         showProfileSheet(context, session);
     }
@@ -50,7 +120,7 @@ class HomeScreen extends StatelessWidget {
       backgroundColor: CooklyColors.surface,
       bottomNavigationBar: CooklyBottomNav(
         current: CooklyTab.kitchen,
-        onSelected: (tab) => _onTabSelected(context, tab),
+        onSelected: _onTabSelected,
       ),
       body: SafeArea(
         bottom: false,
@@ -65,31 +135,36 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(
-                  CooklySpacing.marginMobile,
-                  12,
-                  CooklySpacing.marginMobile,
-                  CooklySpacing.lg,
-                ),
-                children: [
-                  _GreetingSection(firstName: session.firstName),
-                  const SizedBox(height: 12),
-                  _PrepareMealCard(
-                    onMealSelected: (meal) => _openMealPrep(context, meal),
+              child: RefreshIndicator(
+                color: CooklyColors.primary,
+                onRefresh: _loadDishes,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(
+                    CooklySpacing.marginMobile,
+                    12,
+                    CooklySpacing.marginMobile,
+                    CooklySpacing.lg,
                   ),
-                  const SizedBox(height: CooklySpacing.md),
-                  _PantrySummaryCard(onManage: () => _openPantry(context)),
-                  const SizedBox(height: CooklySpacing.md),
-                  const _DishSearchField(),
-                  const SizedBox(height: CooklySpacing.lg),
-                  const _RecentDishesHeader(),
-                  const SizedBox(height: CooklySpacing.md),
-                  for (final dish in _dummyDishes) ...[
-                    _DishCard(dish: dish),
+                  children: [
+                    _GreetingSection(
+                      firstName: session.firstName,
+                      onShowRecent: _showAllDishes,
+                    ),
+                    const SizedBox(height: 12),
+                    _PrepareMealCard(onMealSelected: _openMealPrep),
                     const SizedBox(height: CooklySpacing.md),
+                    _PantrySummaryCard(onManage: _openPantry),
+                    const SizedBox(height: CooklySpacing.md),
+                    _DishSearchField(controller: _searchController),
+                    const SizedBox(height: CooklySpacing.lg),
+                    _RecentDishesHeader(
+                      onViewAll: _dishes.isEmpty ? null : _showAllDishes,
+                    ),
+                    const SizedBox(height: CooklySpacing.md),
+                    ..._buildDishes(),
                   ],
-                ],
+                ),
               ),
             ),
           ],
@@ -97,6 +172,69 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+
+  List<Widget> _buildDishes() {
+    if (_isLoadingDishes && _dishes.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: CooklySpacing.xl),
+          child: Center(
+            child: CircularProgressIndicator(color: CooklyColors.primary),
+          ),
+        ),
+      ];
+    }
+    if (_dishesError != null && _dishes.isEmpty) {
+      return [
+        _DishesMessage(
+          icon: Icons.cloud_off_outlined,
+          title: "Couldn't load your dishes",
+          message: _dishesError!,
+          actionLabel: 'Try again',
+          onAction: _loadDishes,
+        ),
+      ];
+    }
+    if (_dishes.isEmpty) {
+      return const [
+        _DishesMessage(
+          icon: Icons.restaurant_menu,
+          title: 'No dishes yet',
+          message:
+              'Tap Breakfast, Lunch or Dinner above and Cookly will suggest your first meal.',
+        ),
+      ];
+    }
+
+    final query = _searchController.text.trim();
+    final visible = query.isEmpty
+        ? _dishes.take(_homeDishLimit).toList()
+        : _dishes.where((dish) => dish.matches(query)).toList();
+    if (visible.isEmpty) {
+      return [
+        _DishesMessage(
+          icon: Icons.search_off,
+          title: 'No dishes match "$query"',
+          message: 'Try a dish name, an ingredient or a meal like "breakfast".',
+        ),
+      ];
+    }
+    return [
+      for (final dish in visible) ...[
+        _DishCard(dish: dish, onOpen: () => _openRecipe(dish)),
+        const SizedBox(height: CooklySpacing.md),
+      ],
+    ];
+  }
+}
+
+String _suggestedLabel(DateTime? suggestedAt) {
+  if (suggestedAt == null) return 'Suggested earlier';
+  final daysAgo = -calendarDaysFromToday(suggestedAt);
+  if (daysAgo <= 0) return 'Suggested today';
+  if (daysAgo == 1) return 'Suggested yesterday';
+  if (daysAgo < 7) return 'Suggested $daysAgo days ago';
+  return 'Suggested ${formatShortDate(suggestedAt)}';
 }
 
 String _greetingFor(DateTime now) {
@@ -106,9 +244,10 @@ String _greetingFor(DateTime now) {
 }
 
 class _GreetingSection extends StatelessWidget {
-  const _GreetingSection({required this.firstName});
+  const _GreetingSection({required this.firstName, required this.onShowRecent});
 
   final String firstName;
+  final VoidCallback onShowRecent;
 
   @override
   Widget build(BuildContext context) {
@@ -117,21 +256,35 @@ class _GreetingSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            const CooklyChip(
-              label: 'Pantry Ready',
-              background: CooklyColors.secondaryContainer,
-              foreground: CooklyColors.onSecondaryContainer,
-              leading: CooklyStatusDot(color: CooklyColors.secondary),
+            // Chips keep their full width and only truncate when the row is too narrow.
+            const Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: CooklyChip(
+                        label: 'Pantry Ready',
+                        background: CooklyColors.secondaryContainer,
+                        foreground: CooklyColors.onSecondaryContainer,
+                        leading: CooklyStatusDot(color: CooklyColors.secondary),
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    Flexible(
+                      child: CooklyChip(
+                        label: 'Spring Season',
+                        background: CooklyColors.surfaceContainerHigh,
+                        foreground: CooklyColors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(width: 6),
-            const CooklyChip(
-              label: 'Spring Season',
-              background: CooklyColors.surfaceContainerHigh,
-              foreground: CooklyColors.onSurfaceVariant,
-            ),
-            const Spacer(),
             TextButton.icon(
-              onPressed: () => _showRecentDishesSheet(context),
+              onPressed: onShowRecent,
               icon: const Icon(Icons.history, size: 18),
               label: Text('Recent', style: CooklyTextStyles.labelMd),
               style: TextButton.styleFrom(
@@ -427,7 +580,9 @@ class _PantrySummaryCard extends StatelessWidget {
 }
 
 class _DishSearchField extends StatelessWidget {
-  const _DishSearchField();
+  const _DishSearchField({required this.controller});
+
+  final TextEditingController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -446,6 +601,8 @@ class _DishSearchField extends StatelessWidget {
           ),
           Expanded(
             child: TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
               style: CooklyTextStyles.bodyMd.copyWith(
                 color: CooklyColors.onSurface,
               ),
@@ -460,15 +617,18 @@ class _DishSearchField extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(
-            onPressed: () {},
-            tooltip: 'Filter dishes',
-            icon: const Icon(
-              Icons.tune,
-              size: 20,
-              color: CooklyColors.onSurfaceVariant,
-            ),
-          ),
+          if (controller.text.isNotEmpty)
+            IconButton(
+              onPressed: controller.clear,
+              tooltip: 'Clear search',
+              icon: const Icon(
+                Icons.close,
+                size: 20,
+                color: CooklyColors.onSurfaceVariant,
+              ),
+            )
+          else
+            const SizedBox(width: CooklySpacing.sm),
         ],
       ),
     );
@@ -476,7 +636,9 @@ class _DishSearchField extends StatelessWidget {
 }
 
 class _RecentDishesHeader extends StatelessWidget {
-  const _RecentDishesHeader();
+  const _RecentDishesHeader({required this.onViewAll});
+
+  final VoidCallback? onViewAll;
 
   @override
   Widget build(BuildContext context) {
@@ -494,253 +656,289 @@ class _RecentDishesHeader extends StatelessWidget {
             ],
           ),
         ),
-        TextButton(
-          onPressed: () => _showRecentDishesSheet(context),
-          style: TextButton.styleFrom(
-            foregroundColor: CooklyColors.primary,
-            visualDensity: VisualDensity.compact,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'View all',
-                style: CooklyTextStyles.labelMd.copyWith(
-                  color: CooklyColors.primary,
+        if (onViewAll != null)
+          TextButton(
+            onPressed: onViewAll,
+            style: TextButton.styleFrom(
+              foregroundColor: CooklyColors.primary,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'View all',
+                  style: CooklyTextStyles.labelMd.copyWith(
+                    color: CooklyColors.primary,
+                  ),
                 ),
-              ),
-              const Icon(Icons.chevron_right, size: 16),
-            ],
+                const Icon(Icons.chevron_right, size: 16),
+              ],
+            ),
           ),
-        ),
       ],
     );
   }
 }
 
-class _DishCard extends StatefulWidget {
-  const _DishCard({required this.dish});
+class _MealArt extends StatelessWidget {
+  const _MealArt({required this.mealType, required this.iconSize});
 
-  final _DummyDish dish;
-
-  @override
-  State<_DishCard> createState() => _DishCardState();
-}
-
-class _DishCardState extends State<_DishCard> {
-  bool _isStarred = false;
+  final MealType mealType;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
-    final dish = widget.dish;
-    final overlayChipColor = CooklyColors.surfaceBright.withValues(alpha: 0.9);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: CooklyColors.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(CooklyRadius.sheet),
-        boxShadow: CooklyShadows.card,
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [CooklyColors.primaryFixed, CooklyColors.tertiaryFixed],
+        ),
       ),
+      child: Center(
+        child: Icon(mealType.icon, size: iconSize, color: CooklyColors.primary),
+      ),
+    );
+  }
+}
+
+class _DishCard extends StatelessWidget {
+  const _DishCard({required this.dish, required this.onOpen});
+
+  static const _previewIngredients = 3;
+
+  final Recipe dish;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final overlayChipColor = CooklyColors.surfaceBright.withValues(alpha: 0.9);
+    final extraIngredients = dish.ingredients.length - _previewIngredients;
+
+    return Material(
+      color: CooklyColors.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(CooklyRadius.sheet),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            height: 176,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _DishImage(url: dish.imageUrl),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [
-                        Color(0x80000000),
-                        Color(0x1A000000),
-                        Color(0x00000000),
-                      ],
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 12,
-                  left: 12,
-                  child: Row(
-                    children: [
-                      CooklyChip(
-                        label: dish.meal,
+      elevation: 0,
+      child: InkWell(
+        onTap: onOpen,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(CooklyRadius.sheet),
+            boxShadow: CooklyShadows.card,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 132,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _MealArt(mealType: dish.mealType, iconSize: 56),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: CooklyChip(
+                        label: dish.mealType.label,
                         background: overlayChipColor,
                         foreground: CooklyColors.onSurface,
                         leading: Icon(
-                          dish.mealIcon,
+                          dish.mealType.icon,
                           size: 15,
-                          color: dish.mealIconColor,
+                          color: CooklyColors.tertiary,
                         ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 4,
                         ),
                       ),
-                      const SizedBox(width: CooklySpacing.sm),
-                      CooklyChip(
-                        label: dish.tag,
-                        background: dish.tagBackground,
-                        foreground: dish.tagForeground,
+                    ),
+                    Positioned(
+                      bottom: 12,
+                      right: 12,
+                      child: CooklyChip(
+                        label: '${dish.steps.length} steps',
+                        background: overlayChipColor,
+                        foreground: CooklyColors.onSurface,
+                        textStyle: CooklyTextStyles.labelMd,
+                        leading: const Icon(
+                          Icons.format_list_numbered,
+                          size: 16,
+                          color: CooklyColors.primary,
+                        ),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 4,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                Positioned(
-                  bottom: 12,
-                  right: 12,
-                  child: CooklyChip(
-                    label: dish.cookTime,
-                    background: overlayChipColor,
-                    foreground: CooklyColors.onSurface,
-                    textStyle: CooklyTextStyles.labelMd,
-                    leading: const Icon(
-                      Icons.schedule,
-                      size: 16,
-                      color: CooklyColors.primary,
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(CooklySpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+              ),
+              Padding(
+                padding: const EdgeInsets.all(CooklySpacing.md),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Text(dish.name, style: CooklyTextStyles.headlineMd),
+                    const SizedBox(height: 2),
+                    Text(
+                      _suggestedLabel(dish.suggestedAt),
+                      style: CooklyTextStyles.bodySm,
+                    ),
+                    if (dish.ingredients.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Text(dish.name, style: CooklyTextStyles.headlineMd),
-                          Text(
-                            dish.description,
-                            style: CooklyTextStyles.bodySm,
-                          ),
+                          Text('Uses:', style: CooklyTextStyles.labelSm),
+                          for (final ingredient in dish.ingredients.take(
+                            _previewIngredients,
+                          ))
+                            CooklyChip(
+                              label: ingredient.name,
+                              background: CooklyColors.secondaryContainer
+                                  .withValues(alpha: 0.6),
+                              foreground: CooklyColors.onSecondaryContainer,
+                            ),
+                          if (extraIngredients > 0)
+                            CooklyChip(
+                              label: '+$extraIngredients more',
+                              background: CooklyColors.surfaceContainer,
+                              foreground: CooklyColors.onSurfaceVariant,
+                            ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () => setState(() => _isStarred = !_isStarred),
-                      tooltip: _isStarred ? 'Unstar' : 'Star',
-                      icon: Icon(
-                        _isStarred ? Icons.star : Icons.star_border,
-                        size: 22,
-                        color: _isStarred
-                            ? CooklyColors.primary
-                            : CooklyColors.outline,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text('In pantry:', style: CooklyTextStyles.labelSm),
-                    for (final ingredient in dish.pantryIngredients)
-                      CooklyChip(
-                        label: ingredient,
-                        background: CooklyColors.secondaryContainer.withValues(
-                          alpha: 0.6,
-                        ),
-                        foreground: CooklyColors.onSecondaryContainer,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Icon(
-                      dish.footerIcon,
-                      size: 16,
-                      color: CooklyColors.secondary,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        dish.footer,
-                        style: CooklyTextStyles.labelSm.copyWith(
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.checklist,
+                          size: 16,
                           color: CooklyColors.secondary,
                         ),
-                      ),
-                    ),
-                    FilledButton(
-                      onPressed: () {},
-                      style: FilledButton.styleFrom(
-                        backgroundColor: CooklyColors.primary,
-                        foregroundColor: CooklyColors.onPrimary,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        minimumSize: const Size(0, 36),
-                        textStyle: CooklyTextStyles.labelMd,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(CooklyRadius.xl),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            '${dish.ingredients.length} ingredients',
+                            style: CooklyTextStyles.labelSm.copyWith(
+                              color: CooklyColors.secondary,
+                            ),
+                          ),
                         ),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('Cook Again'),
-                          SizedBox(width: 6),
-                          Icon(Icons.arrow_forward, size: 16),
-                        ],
-                      ),
+                        FilledButton(
+                          onPressed: onOpen,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: CooklyColors.primary,
+                            foregroundColor: CooklyColors.onPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            minimumSize: const Size(0, 36),
+                            textStyle: CooklyTextStyles.labelMd,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                CooklyRadius.xl,
+                              ),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Cook Again'),
+                              SizedBox(width: 6),
+                              Icon(Icons.arrow_forward, size: 16),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DishesMessage extends StatelessWidget {
+  const _DishesMessage({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: CooklySpacing.lg,
+        horizontal: CooklySpacing.md,
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: CooklyColors.secondaryContainer.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 28, color: CooklyColors.secondary),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: CooklyTextStyles.headlineSm,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            style: CooklyTextStyles.bodySm,
+            textAlign: TextAlign.center,
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: CooklySpacing.sm),
+            TextButton(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: CooklyColors.primary,
+              ),
+              child: Text(
+                actionLabel!,
+                style: CooklyTextStyles.labelLg.copyWith(
+                  color: CooklyColors.primary,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _DishImage extends StatelessWidget {
-  const _DishImage({required this.url});
-
-  final String url;
-
-  @override
-  Widget build(BuildContext context) {
-    const placeholder = ColoredBox(
-      color: CooklyColors.surfaceContainerHigh,
-      child: Center(
-        child: Icon(Icons.restaurant, size: 32, color: CooklyColors.outline),
-      ),
-    );
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => placeholder,
-      loadingBuilder: (_, child, progress) =>
-          progress == null ? child : placeholder,
-    );
-  }
-}
-
-void _showRecentDishesSheet(BuildContext context) {
+void _showRecentDishesSheet(
+  BuildContext context,
+  List<Recipe> dishes,
+  ValueChanged<Recipe> onOpen,
+) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -751,190 +949,129 @@ void _showRecentDishesSheet(BuildContext context) {
       ),
     ),
     builder: (sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, CooklySpacing.md),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 48,
-              height: 6,
-              decoration: BoxDecoration(
-                color: CooklyColors.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(CooklyRadius.full),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Recent Dishes', style: CooklyTextStyles.headlineMd),
-                      Text(
-                        'Tap any dish to quickly start step-by-step cooking',
-                        style: CooklyTextStyles.bodySm,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton.filledTonal(
-                  onPressed: () => Navigator.of(sheetContext).pop(),
-                  tooltip: 'Close recent dishes',
-                  style: IconButton.styleFrom(
-                    backgroundColor: CooklyColors.surfaceContainer,
-                  ),
-                  icon: const Icon(
-                    Icons.close,
-                    size: 20,
-                    color: CooklyColors.onSurface,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            for (final dish in _dummyDishes)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: CooklyColors.surfaceContainerLowest,
-                    borderRadius: BorderRadius.circular(CooklyRadius.card),
-                    boxShadow: CooklyShadows.subtle,
-                  ),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(CooklyRadius.xl),
-                        child: SizedBox(
-                          width: 56,
-                          height: 56,
-                          child: _DishImage(url: dish.imageUrl),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              dish.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: CooklyTextStyles.headlineSm,
-                            ),
-                            Text(
-                              dish.historySummary,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: CooklyTextStyles.bodySm,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(
-                        Icons.arrow_forward_ios,
-                        size: 18,
-                        color: CooklyColors.outline,
-                      ),
-                    ],
-                  ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, CooklySpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: CooklyColors.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(CooklyRadius.full),
                 ),
               ),
-          ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Recent Dishes',
+                          style: CooklyTextStyles.headlineMd,
+                        ),
+                        Text(
+                          dishes.isEmpty
+                              ? 'Dishes Cookly suggests will appear here'
+                              : 'Tap any dish to see its recipe and steps',
+                          style: CooklyTextStyles.bodySm,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    tooltip: 'Close recent dishes',
+                    style: IconButton.styleFrom(
+                      backgroundColor: CooklyColors.surfaceContainer,
+                    ),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 20,
+                      color: CooklyColors.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: dishes.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (_, index) {
+                    final dish = dishes[index];
+                    return Material(
+                      color: CooklyColors.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(CooklyRadius.card),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(CooklyRadius.card),
+                        onTap: () {
+                          Navigator.of(sheetContext).pop();
+                          onOpen(dish);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Row(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(
+                                  CooklyRadius.xl,
+                                ),
+                                child: SizedBox(
+                                  width: 56,
+                                  height: 56,
+                                  child: _MealArt(
+                                    mealType: dish.mealType,
+                                    iconSize: 26,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      dish.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: CooklyTextStyles.headlineSm,
+                                    ),
+                                    Text(
+                                      '${dish.mealType.label} • ${dish.steps.length} steps • '
+                                      '${_suggestedLabel(dish.suggestedAt)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: CooklyTextStyles.bodySm,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.arrow_forward_ios,
+                                size: 18,
+                                color: CooklyColors.outline,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     ),
   );
 }
-
-class _DummyDish {
-  const _DummyDish({
-    required this.name,
-    required this.description,
-    required this.meal,
-    required this.mealIcon,
-    required this.mealIconColor,
-    required this.tag,
-    required this.tagBackground,
-    required this.tagForeground,
-    required this.cookTime,
-    required this.imageUrl,
-    required this.pantryIngredients,
-    required this.footerIcon,
-    required this.footer,
-    required this.historySummary,
-  });
-
-  final String name;
-  final String description;
-  final String meal;
-  final IconData mealIcon;
-  final Color mealIconColor;
-  final String tag;
-  final Color tagBackground;
-  final Color tagForeground;
-  final String cookTime;
-  final String imageUrl;
-  final List<String> pantryIngredients;
-  final IconData footerIcon;
-  final String footer;
-  final String historySummary;
-}
-
-const _dummyDishes = [
-  _DummyDish(
-    name: 'Apple Banana Oats Bowl',
-    description:
-        'Cinnamon rolled oats, fresh honeycrisp apple & toasted almonds',
-    meal: 'Breakfast',
-    mealIcon: Icons.wb_twilight,
-    mealIconColor: CooklyColors.tertiary,
-    tag: 'Morning Calm',
-    tagBackground: CooklyColors.tertiaryFixed,
-    tagForeground: CooklyColors.onTertiaryFixed,
-    cookTime: '10-15 min',
-    imageUrl:
-        'https://lh3.googleusercontent.com/aida/AEtjO1XqXxdZqFATJYX328CIPIRiLwDvarznTtuFjFcDj6MlCOB_wEG9v79CAhYUa-3zDiJouXTEl18Kznxm8C4HXNUl0oOefOJPb9LSP6reLao_eAbzFD8TND0JCAeEJP7U4l0S1Oe5rxrvQo2qBJ-DBjdHJ14mw5Z4YXv600gCiHcYADxIYThjKpRLuENgRrP5H0ZgxFQgooSSmXEmUjZFwEwWbXz9uAfAIjj4qRm5owoxR4kh1p-31EetiMtf',
-    pantryIngredients: ['Rolled Oats', 'Bananas', 'Chia Seeds'],
-    footerIcon: Icons.check_circle_outline,
-    footer: '100% pantry match',
-    historySummary: 'Breakfast Oats • 10-15 min • Cooked yesterday',
-  ),
-  _DummyDish(
-    name: 'Balanced Harvest Bowl',
-    description: 'Seared herb chicken breast, edamame & seasoned avocado',
-    meal: 'Lunch',
-    mealIcon: Icons.wb_sunny_outlined,
-    mealIconColor: CooklyColors.primary,
-    tag: 'High Protein',
-    tagBackground: CooklyColors.secondaryContainer,
-    tagForeground: CooklyColors.onSecondaryContainer,
-    cookTime: '20-25 min',
-    imageUrl:
-        'https://lh3.googleusercontent.com/aida/AEtjO1XOYPn3A5uAVvSP5cHjBYPD7jAu6LvcidCWh6SgnFJlA2cgepfmRJi1IyFrL5kWaNOHeZQcJGqKDPRAVJJR4Nygew-CheJMT6qy9pakUsjLFg5mv8EpwejxaYb7xBDvmNmSMHlDax-Zl_pwq9iZcWqKiMpoLhDvOP_rzx9z0415R6zxMtPZoMpEA_PJ3HZdbXxWclPdN0ghiiiTPzAjfk-mSTG_FgECdHKrF5YTSxoGF21uRkKtjkyCFkE',
-    pantryIngredients: ['Free-range Chicken', 'Jasmine Rice', 'Sweet Potatoes'],
-    footerIcon: Icons.check_circle_outline,
-    footer: '42g Protein • Low GI',
-    historySummary: 'High Protein Bowl • 20-25 min • Cooked 3 days ago',
-  ),
-  _DummyDish(
-    name: 'Creamy Tomato Penne',
-    description: 'Creamy roasted garlic and cherry tomato penne with basil',
-    meal: 'Dinner',
-    mealIcon: Icons.nights_stay_outlined,
-    mealIconColor: CooklyColors.primary,
-    tag: 'Comfort Food',
-    tagBackground: CooklyColors.primaryFixed,
-    tagForeground: CooklyColors.onPrimaryFixed,
-    cookTime: '20 min',
-    imageUrl:
-        'https://lh3.googleusercontent.com/aida/AEtjO1VkVq1jePNm0CsL8Am4wuQRyfsIfmm6IXimjp9X7Qo9JSLFkkekolufdhF25rE6rLInSwiYun7HKjFunme1cyklDCIbwtIi241Yf1e5zo8HYan-1bNTcdU9APiDQ6jMIcdcKxUSGnEJNo3UCKNxXB-4bXrrou19dE6zn4L6sCjbuZxCmzYgDT_0vS8uyIQXroSo6-B45O2Ow0man6xrfS_mZ0Z7_Nu1mABaHtmg_KZoguG2o7gOYkHEEVrL',
-    pantryIngredients: ['Penne Rigate', 'San Marzano', 'Sweet Basil'],
-    footerIcon: Icons.eco_outlined,
-    footer: 'Fresh herb harvest ready',
-    historySummary: 'Italian Penne • 20 min • Cooked 2 days ago',
-  ),
-];

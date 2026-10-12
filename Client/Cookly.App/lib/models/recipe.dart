@@ -1,9 +1,11 @@
+import '../utils/dates.dart';
 import 'meal_type.dart';
 
 class RecipeIngredient {
   const RecipeIngredient({required this.name, this.quantity});
 
-  factory RecipeIngredient.fromJson(Map<String, dynamic> json) => RecipeIngredient(
+  factory RecipeIngredient.fromJson(Map<String, dynamic> json) =>
+      RecipeIngredient(
         name: json['name'] as String? ?? '',
         quantity: json['quantity'] as String?,
       );
@@ -41,9 +43,27 @@ class Recipe {
     required this.ingredients,
     required this.steps,
     this.description,
+    this.suggestedAt,
   });
 
-  factory Recipe.fromJson(Map<String, dynamic> json, MealType mealType) => Recipe(
+  /// An entry from `GET /api/dishes/history`.
+  factory Recipe.fromHistoryJson(Map<String, dynamic> json) => Recipe(
+    dishId: (json['dishId'] as num?)?.toInt() ?? 0,
+    name: json['name'] as String? ?? 'Your dish',
+    mealType: MealType.fromValue(json['meal']) ?? MealType.dinner,
+    suggestedAt: parseServerDate(json['suggestedDate']),
+    ingredients: [
+      for (final item in json['ingredients'] as List? ?? const [])
+        RecipeIngredient.fromJson(item as Map<String, dynamic>),
+    ],
+    steps: [
+      for (final step in json['steps'] as List? ?? const [])
+        if (step is String && step.trim().isNotEmpty) RecipeStep.parse(step),
+    ],
+  );
+
+  factory Recipe.fromJson(Map<String, dynamic> json, MealType mealType) =>
+      Recipe(
         dishId: (json['dishId'] as num?)?.toInt() ?? 0,
         name: json['name'] as String? ?? 'Your dish',
         description: json['description'] as String?,
@@ -54,7 +74,8 @@ class Recipe {
         ],
         steps: [
           for (final step in json['steps'] as List? ?? const [])
-            if (step is String && step.trim().isNotEmpty) RecipeStep.parse(step),
+            if (step is String && step.trim().isNotEmpty)
+              RecipeStep.parse(step),
         ],
       );
 
@@ -64,4 +85,13 @@ class Recipe {
   final MealType mealType;
   final List<RecipeIngredient> ingredients;
   final List<RecipeStep> steps;
+  final DateTime? suggestedAt;
+
+  bool matches(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return name.toLowerCase().contains(q) ||
+        mealType.label.toLowerCase().contains(q) ||
+        ingredients.any((i) => i.name.toLowerCase().contains(q));
+  }
 }

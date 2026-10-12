@@ -14,9 +14,11 @@ class PantryItemCard extends StatelessWidget {
     required this.onDelete,
     required this.onIncrease,
     required this.onDecrease,
+    this.isEstimatingExpiry = false,
   });
 
   final PantryItem item;
+  final bool isEstimatingExpiry;
   final VoidCallback onDelete;
   final VoidCallback onIncrease;
 
@@ -25,7 +27,9 @@ class PantryItemCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final expiry = _ExpiryStyle.of(item);
+    final expiry = isEstimatingExpiry && item.expiresAt == null
+        ? _ExpiryStyle.estimating
+        : _ExpiryStyle.of(item);
     final category = item.category;
     final addedAt = item.purchasedAt;
 
@@ -81,7 +85,10 @@ class PantryItemCard extends StatelessWidget {
                     ),
                     if (addedAt != null) ...[
                       const SizedBox(height: 2),
-                      Text(_addedLabel(addedAt), style: CooklyTextStyles.bodySm),
+                      Text(
+                        _addedLabel(addedAt),
+                        style: CooklyTextStyles.bodySm,
+                      ),
                     ],
                   ],
                 ),
@@ -108,7 +115,10 @@ class PantryItemCard extends StatelessWidget {
                   background: expiry.background,
                   foreground: expiry.foreground,
                   leading: CooklyStatusDot(color: expiry.dot),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                 ),
               ),
               const SizedBox(width: CooklySpacing.sm),
@@ -158,15 +168,27 @@ class _QuantityStepper extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _StepButton(icon: Icons.remove, tooltip: 'Decrease $itemName', onPressed: onDecrease),
+          _StepButton(
+            icon: Icons.remove,
+            tooltip: 'Decrease $itemName',
+            onPressed: onDecrease,
+          ),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 56),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(label, textAlign: TextAlign.center, style: CooklyTextStyles.labelMd),
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: CooklyTextStyles.labelMd,
+              ),
             ),
           ),
-          _StepButton(icon: Icons.add, tooltip: 'Increase $itemName', onPressed: onIncrease),
+          _StepButton(
+            icon: Icons.add,
+            tooltip: 'Increase $itemName',
+            onPressed: onIncrease,
+          ),
         ],
       ),
     );
@@ -174,7 +196,11 @@ class _QuantityStepper extends StatelessWidget {
 }
 
 class _StepButton extends StatelessWidget {
-  const _StepButton({required this.icon, required this.tooltip, required this.onPressed});
+  const _StepButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
 
   final IconData icon;
   final String tooltip;
@@ -186,7 +212,9 @@ class _StepButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: enabled ? CooklyColors.surfaceContainerLowest : Colors.transparent,
+        color: enabled
+            ? CooklyColors.surfaceContainerLowest
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(CooklyRadius.lg),
         child: InkWell(
           onTap: onPressed,
@@ -223,8 +251,20 @@ class _ExpiryStyle {
   final Color dot;
   final Color iconBackground;
 
-  static final _calmIconBackground = CooklyColors.secondaryContainer.withValues(alpha: 0.5);
-  static final _urgentIconBackground = CooklyColors.primaryFixed.withValues(alpha: 0.4);
+  static final _calmIconBackground = CooklyColors.secondaryContainer.withValues(
+    alpha: 0.5,
+  );
+  static final _urgentIconBackground = CooklyColors.primaryFixed.withValues(
+    alpha: 0.4,
+  );
+
+  static final estimating = _ExpiryStyle(
+    label: 'Estimating expiry…',
+    background: CooklyColors.tertiaryFixed.withValues(alpha: 0.6),
+    foreground: CooklyColors.onTertiaryFixed,
+    dot: CooklyColors.tertiary,
+    iconBackground: _calmIconBackground,
+  );
 
   factory _ExpiryStyle.of(PantryItem item) {
     final days = item.daysUntilExpiry;
