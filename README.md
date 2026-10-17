@@ -2,7 +2,7 @@
 
 Cookly is an AI cooking assistant. It looks at what's in your pantry, picks a meal that fits your goals and taste, and writes a step-by-step recipe for it, streaming each stage to the app as it happens.
 
-The backend is a .NET 10 API that runs three AI agents in a handoff workflow on Azure AI Foundry. The client is a Flutter app for iOS and Android.
+The backend is a .NET 10 API built on **Microsoft Agent Framework**: three AI agents work together using its **handoff workflow** strategy, running on **Azure AI Foundry**. The client is a Flutter app for iOS and Android.
 
 ## How it works
 
@@ -175,11 +175,3 @@ cd Client/Cookly.App
 flutter analyze
 flutter test
 ```
-
-## Known limitations
-
-- Workflow checkpoints, run state, the background queue and the pantry event hub are held in memory. Restarting the API loses in-progress runs and queued expiry jobs, and it only works on a single instance.
-- `/api/auth/login` doesn't verify a Google ID token yet; it trusts the email it's sent.
-- "Dishes Cooked" counts dishes Cookly has suggested, since the app doesn't track whether a dish was actually cooked.
-- Dish names have a unique index across all users (`IX_Dishes_Name`), so saving a dish with an existing name fails.
-- An AI shelf-life estimate for an unknown item can take up to about 30 seconds.
