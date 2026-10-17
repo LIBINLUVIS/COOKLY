@@ -82,6 +82,7 @@ builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IInventoryToolsService, InventoryToolsService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IDishService, DishService>();
+builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddScoped<IAIService, AIService>();
 builder.Services.AddSingleton<ShelfLifeCatalog>();
 builder.Services.AddScoped<IShelfLifeService, ShelfLifeService>();
@@ -166,6 +167,7 @@ app.MapControllers();
 app.MapAuthEndpoints();
 app.MapInventoryEndpoints();
 app.MapDishEndpoints();
+app.MapProfileEndpoints();
 
 app.Run();
 

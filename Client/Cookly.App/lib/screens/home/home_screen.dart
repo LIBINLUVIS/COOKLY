@@ -12,10 +12,10 @@ import '../../utils/dates.dart';
 import '../../widgets/cookly_bottom_nav.dart';
 import '../../widgets/cookly_chip.dart';
 import '../../widgets/cookly_top_bar.dart';
-import '../../widgets/profile_sheet.dart';
 import '../meal_plan/meal_prep_screen.dart';
 import '../meal_plan/recipe_guide_screen.dart';
 import '../pantry/pantry_screen.dart';
+import '../profile/profile_screen.dart';
 
 /// Kitchen dashboard. The greeting and Recent Dishes are live; the pantry
 /// summary card is still placeholder content.
@@ -110,7 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
       case CooklyTab.pantry:
         _openPantry();
       case CooklyTab.profile:
-        showProfileSheet(context, session);
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ProfileScreen(session: session)),
+        );
     }
   }
 

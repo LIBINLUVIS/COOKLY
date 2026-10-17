@@ -12,7 +12,7 @@ import '../../theme/cookly_text_styles.dart';
 import '../../theme/cookly_theme.dart';
 import '../../widgets/cookly_bottom_nav.dart';
 import '../../widgets/cookly_top_bar.dart';
-import '../../widgets/profile_sheet.dart';
+import '../profile/profile_screen.dart';
 import 'add_pantry_item_sheet.dart';
 import 'pantry_item_card.dart';
 
@@ -292,7 +292,9 @@ class _PantryScreenState extends State<PantryScreen> {
       case CooklyTab.pantry:
         break;
       case CooklyTab.profile:
-        showProfileSheet(context, widget.session);
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ProfileScreen(session: widget.session)),
+        );
     }
   }
 
